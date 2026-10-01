@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Literal
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -17,6 +18,8 @@ log = logging.getLogger(__name__)
 Tier = Literal["main", "lite", "reasoning"]
 
 _client: genai.Client | None = None
+# Without a timeout a stalled connection can hang a job (and the backfill queue) indefinitely.
+REQUEST_TIMEOUT_MS = 300_000
 
 
 class AIUnavailable(RuntimeError):
@@ -29,7 +32,9 @@ def get_client() -> genai.Client:
         key = get_settings().gemini_key
         if key is None:
             raise AIUnavailable("GEMINI_KEY is not configured")
-        _client = genai.Client(api_key=key.get_secret_value())
+        _client = genai.Client(
+            api_key=key.get_secret_value(), http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS)
+        )
     return _client
 
 
@@ -59,6 +64,8 @@ async def _log_call(purpose: str, model: str, started: float, resp, error: str |
 
 
 def _retryable(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return True
     if not isinstance(exc, genai_errors.APIError):
         return False
     # A 429 for an exhausted spend cap/quota won't clear by retrying; only rate limits and 5xx will.

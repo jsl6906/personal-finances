@@ -57,7 +57,8 @@ export function BackfillCard() {
   const configured = !!d && (d.settings.provider === 'local' ? d.settings.folder_name !== null : !!d.settings.folder_id)
   const flagged = (s?.by_status.review ?? 0) + (s?.by_status.failed ?? 0)
   const years = s?.earliest ? `${s.earliest.slice(0, 4)} – ${(s.latest ?? s.earliest).slice(0, 4)}` : ''
-  const running = !!d && !d.settings.paused
+  // Not paused but no job queued means the job chain broke; show Start so it can be revived.
+  const running = !!d && !d.settings.paused && d.running
 
   return (
     <Card style={{ gap: 'var(--space-3)' }}>

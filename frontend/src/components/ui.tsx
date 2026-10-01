@@ -22,6 +22,10 @@ export function Card({ children, className = '', style, as: Tag = 'div' }: CardP
   )
 }
 
+export function Swatch({ color }: { color: string }) {
+  return <span className="swatch" style={{ background: color }} />
+}
+
 type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' }
 
 export function Button({ variant = 'secondary', className = '', children, ...rest }: BtnProps) {

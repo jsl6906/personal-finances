@@ -21,6 +21,16 @@ async def _enqueue(job_type: str, payload: dict | None = None) -> None:
         log.exception("Scheduled enqueue of %s failed", job_type)
 
 
+async def _backfill_watchdog() -> None:
+    from ledger.sources.jobs import backfill_watchdog
+
+    try:
+        async with get_sessionmaker()() as session:
+            await backfill_watchdog(session)
+    except Exception:
+        log.exception("Backfill watchdog failed")
+
+
 def build_scheduler() -> AsyncIOScheduler:
     s = get_settings()
     scheduler = AsyncIOScheduler(timezone=s.timezone)
@@ -64,5 +74,8 @@ def build_scheduler() -> AsyncIOScheduler:
         id="nightly-cleanup",
         coalesce=True,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _backfill_watchdog, "interval", minutes=10, id="backfill-watchdog", coalesce=True, max_instances=1
     )
     return scheduler

@@ -154,6 +154,35 @@ async def test_local_backfill_end_to_end(client, inbox, fake_ai):
     assert r.json()["status"] == "skipped"
 
 
+async def test_watchdog_revives_broken_chain():
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete
+
+    from ledger.models import Job
+    from ledger.sources.jobs import backfill_watchdog
+
+    async with get_sessionmaker()() as s:
+        await backfill.save_settings(s, paused=True)
+        f = BackfillFile(provider="local", external_id="watchdog/pending.pdf", name="pending.pdf", status="pending")
+        stale = Job(type="backfill_run", status="running", started_at=datetime.now(UTC) - timedelta(hours=3))
+        s.add_all([f, stale])
+        await s.commit()
+        assert await backfill_watchdog(s) is None  # paused
+
+        await backfill.save_settings(s, paused=False)
+        await s.commit()
+        new_id = await backfill_watchdog(s)
+        assert new_id is not None
+        assert (await s.get(Job, stale.id, populate_existing=True)).status == "cancelled"
+        assert await backfill_watchdog(s) is None  # the queued job counts as active
+
+        await backfill.save_settings(s, paused=True)
+        await s.execute(delete(Job).where(Job.id.in_([stale.id, new_id])))
+        await s.execute(delete(BackfillFile).where(BackfillFile.id == f.id))
+        await s.commit()
+
+
 def test_drive_folder_ids():
     assert (
         archive.parse_folder_id("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing")

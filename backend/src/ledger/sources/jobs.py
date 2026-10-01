@@ -1,6 +1,7 @@
 import logging
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.crypto import decrypt
@@ -11,6 +12,9 @@ from ledger.sources import backfill, simplefin, tiller
 from ledger.sources.service import apply_feed, record_run
 
 log = logging.getLogger(__name__)
+
+# A backfill_run handles FILES_PER_JOB files; healthy runs finish in well under this.
+STALE_BACKFILL_RUN = timedelta(hours=1)
 
 
 async def run_sync(session: AsyncSession, source_id: int, full: bool = False, progress=None) -> dict:
@@ -65,6 +69,29 @@ async def backfill_job_active(session: AsyncSession, exclude: int | None = None)
     if exclude:
         q = q.where(Job.id != exclude)
     return (await session.scalar(q.limit(1))) is not None
+
+
+async def backfill_watchdog(session: AsyncSession) -> int | None:
+    """Re-queue the backfill when it should be running but its job chain broke (restarts, hung calls)."""
+    # Serialise across app instances so two watchdogs can't start parallel chains.
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('backfill_run'))"))
+    if (await backfill.load_settings(session))["paused"] or await backfill.next_file(session) is None:
+        return None
+    cutoff = datetime.now(UTC) - STALE_BACKFILL_RUN
+    # Cancelled (not failed) so a hung run that wakes up stops at its next progress check.
+    await session.execute(
+        update(Job)
+        .where(Job.type == "backfill_run", Job.status == "running", Job.started_at < cutoff)
+        .values(status="cancelled", error="Stalled; restarted by watchdog", finished_at=datetime.now(UTC))
+    )
+    if await backfill_job_active(session):
+        await session.commit()
+        return None
+    job = await enqueue(session, "backfill_run", {})
+    await session.commit()
+    log.warning("Backfill job chain was broken; queued job %s", job.id)
+    notify_worker()
+    return job.id
 
 
 @job_handler("backfill_scan")

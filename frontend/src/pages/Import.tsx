@@ -9,13 +9,15 @@ import { STATUS_TAG, STEP_NAMES } from '../review'
 const SHEET_ACCEPT = '.csv,.tsv,.txt,.xlsx,.xlsm,.xls'
 const DOC_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.heic,.gif,.tif,.tiff'
 
-export function Steps({ current, reachable, onGo }: { current: number; reachable: number; onGo?: (n: number) => void }) {
+export function Steps({ current, reachable, onGo, only }: {
+  current: number; reachable: number; onGo?: (n: number) => void; only?: number[]
+}) {
   return (
     <ol className="steps">
       {STEP_NAMES.map((label, i) => {
         const n = i + 1
         const cls = n === current ? ' on' : n < current ? ' done' : ''
-        const can = !!onGo && n <= reachable && n !== current
+        const can = !!onGo && n <= reachable && n !== current && (!only || only.includes(n))
         return (
           <li key={label} className={`step${cls}${can ? ' clickable' : ''}`} onClick={() => can && onGo!(n)}>
             <span className="step-n">{String(n).padStart(2, '0')}</span>

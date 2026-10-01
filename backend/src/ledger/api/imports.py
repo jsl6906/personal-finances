@@ -18,6 +18,7 @@ from ledger.jobs.worker import enqueue, notify_worker
 from ledger.models import (
     Account,
     Attachment,
+    BackfillFile,
     Category,
     DuplicatePair,
     ImportBatch,
@@ -27,6 +28,7 @@ from ledger.models import (
 )
 from ledger.schemas import (
     BatchDetail,
+    BatchSource,
     BatchSummary,
     CommitIn,
     DecisionIn,
@@ -79,8 +81,20 @@ async def _detail(session: AsyncSession, b: ImportBatch) -> BatchDetail:
         if b.template_id
         else None
     )
+    source = BatchSource()
+    if att := b.attachment:
+        source = BatchSource(
+            mime_type=att.mime_type, size_bytes=att.size_bytes, sha256=att.sha256, uploaded_at=att.created_at
+        )
+    bf = await session.scalar(select(BackfillFile).where(BackfillFile.import_batch_id == b.id).limit(1))
+    if bf:
+        source.archive_provider = bf.provider
+        source.archive_path = bf.path
+        source.archive_kind = bf.kind
+        source.archive_modified_at = bf.modified_at
     return BatchDetail(
         **_summary(b),
+        source=source,
         attachment_id=b.attachment_id,
         sheet_name=b.sheet_name,
         sheets=b.sheets,

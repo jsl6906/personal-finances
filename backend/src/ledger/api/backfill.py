@@ -13,7 +13,7 @@ from ledger.models.backfill import BILL_KINDS, STATEMENT_KINDS
 from ledger.schemas import JobOut
 from ledger.sources import archive, backfill
 from ledger.sources.google import service_account_email
-from ledger.sources.jobs import backfill_job_active
+from ledger.sources.jobs import backfill_job_active, backfill_watchdog
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 KINDS = (*STATEMENT_KINDS, *BILL_KINDS, "spreadsheet")
@@ -30,6 +30,7 @@ async def overview(session: AsyncSession = Depends(get_session)):
     return {
         "settings": await backfill.load_settings(session),
         "summary": await backfill.summary(session),
+        "running": await backfill_job_active(session),
         "google_service_account": service_account_email(),
         "inbox_configured": get_settings().inbox_dir is not None,
         "active_job": {"id": running.id, "type": running.type, "message": running.message} if running else None,
@@ -75,8 +76,7 @@ async def start_scan(session: AsyncSession = Depends(get_session)):
 async def start(session: AsyncSession = Depends(get_session)):
     await backfill.save_settings(session, paused=False, last_error=None)
     await session.commit()
-    job = None if await backfill_job_active(session) else await _job(session, "backfill_run")
-    return {"paused": False, "job_id": job.id if job else None}
+    return {"paused": False, "job_id": await backfill_watchdog(session)}
 
 
 @router.post("/pause")

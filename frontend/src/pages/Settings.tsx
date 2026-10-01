@@ -101,7 +101,10 @@ export function Settings() {
       )}
       {tab === 'tags' && (
         <CrudTable title="Tags" kicker="Labels" path="/tags" queryKey="tags" query={tags as unknown as Rows}
-          columns={[{ key: 'name', label: 'Name', kind: 'text', required: true }]}
+          columns={[
+            { key: 'name', label: 'Name', kind: 'text', required: true },
+            { key: 'color', label: 'Color', kind: 'color', width: 180 },
+          ]}
           defaults={{ name: '', color: null }}
         />
       )}

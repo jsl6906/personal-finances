@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { del, post, put } from '../api'
-import { Button, Card, ErrorNote } from './ui'
+import { Button, Card, ErrorNote, Swatch } from './ui'
 
 export type Column = {
   key: string
   label: string
-  kind: 'text' | 'number' | 'bool' | 'select'
+  kind: 'text' | 'number' | 'bool' | 'select' | 'color'
   options?: { value: string | number; label: string }[]
   required?: boolean
   width?: number
@@ -28,6 +28,15 @@ type Props = {
 function Editor({ col, value, onChange }: { col: Column; value: unknown; onChange: (v: unknown) => void }) {
   if (col.kind === 'bool') {
     return <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+  }
+  if (col.kind === 'color') {
+    return (
+      <span className="row" style={{ gap: 8 }}>
+        <input type="color" className="color-input" value={typeof value === 'string' ? value : '#7a8a99'}
+          onChange={(e) => onChange(e.target.value)} />
+        {Boolean(value) && <button type="button" className="link-btn small" onClick={() => onChange(null)}>Clear</button>}
+      </span>
+    )
   }
   if (col.kind === 'select') {
     return (
@@ -74,11 +83,14 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
   }
   const valid = columns.every((c) => !c.required || (draft[c.key] !== null && draft[c.key] !== undefined && draft[c.key] !== ''))
 
-  const show = (row: Row, col: Column): string => {
+  const show = (row: Row, col: Column): ReactNode => {
     const custom = display?.(row, col.key)
     if (custom !== undefined) return custom
     const v = row[col.key]
     if (col.kind === 'bool') return v ? 'Yes' : ''
+    if (col.kind === 'color') {
+      return v ? <span className="row" style={{ gap: 8 }}><Swatch color={String(v)} />{String(v)}</span> : '—'
+    }
     if (col.kind === 'select') return col.options?.find((o) => o.value === v)?.label ?? (v ? String(v) : '—')
     return v === null || v === undefined ? '' : String(v)
   }
@@ -98,7 +110,7 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
   )
 
   return (
-    <Card className="table-card">
+    <Card className="table-card" style={{ overflow: 'visible' }}>
       <div className="row" style={{ justifyContent: 'space-between', padding: 'var(--space-3) var(--space-3) 0' }}>
         <div>
           <div className="card-kicker">{kicker}</div>
@@ -107,9 +119,10 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
         <Button onClick={() => startEdit(null)} disabled={editId === 'new'}>Add</Button>
       </div>
       <div style={{ padding: '0 var(--space-3)' }}><ErrorNote error={save.error || remove.error || query.error} /></div>
+      <div style={{ overflowX: 'auto' }}>
       <table className="table">
         <thead>
-          <tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}<th /></tr>
+          <tr>{columns.map((c) => <th key={c.key} style={c.width ? { width: c.width } : undefined}>{c.label}</th>)}<th /></tr>
         </thead>
         <tbody>
           {editId === 'new' && editRow('new')}
@@ -128,6 +141,7 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
           )}
         </tbody>
       </table>
+      </div>
     </Card>
   )
 }
