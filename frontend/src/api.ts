@@ -83,6 +83,16 @@ export interface Transaction {
 }
 export interface TransactionPage { items: Transaction[]; total: number; total_in: string; total_out: string }
 
+export interface TxnSource {
+  id: number; role: 'created' | 'matched'; origin: string | null; source_type: string | null
+  import_batch_id: number | null; attachment_id: number | null; filename: string | null; mime_type: string | null
+  txn_date: string | null; description: string | null; amount: string | null; match_score: string | null; created_at: string
+}
+export interface TxnNote {
+  id: number; body: string; source: 'user' | 'import'; import_batch_id: number | null; attachment_id: number | null
+  filename: string | null; created_at: string; updated_at: string
+}
+
 export interface Job {
   id: number; type: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   payload: Record<string, unknown>; result: Record<string, unknown> | null; progress: string

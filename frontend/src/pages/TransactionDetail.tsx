@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { del, get, patch, post, upload, type Statement, type Transaction, type TxnPair } from '../api'
+import { del, get, patch, post, upload, type Statement, type Transaction, type TxnNote, type TxnPair, type TxnSource } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { MerchantInput } from '../components/MerchantInput'
 import { Button, Card, ErrorNote, Field, Icon } from '../components/ui'
@@ -47,6 +47,90 @@ type Props = {
   onSaved: (t: Transaction) => void
 }
 
+const ORIGINS: Record<string, string> = { upload: 'Upload', backfill: 'Drive archive', tiller: 'Tiller', simplefin: 'SimpleFIN' }
+
+function SourceRow({ s, txn }: { s: TxnSource; txn: Transaction }) {
+  const label = s.filename ?? `${ORIGINS[s.origin ?? ''] ?? s.origin ?? 'Import'}${s.source_type === 'spreadsheet' ? ' sheet' : ''}`
+  const differs = (s.description && s.description !== txn.description) || (s.txn_date && s.txn_date !== txn.txn_date)
+    || (s.amount !== null && Number(s.amount) !== Number(txn.amount))
+  return (
+    <div className="row" style={{ border: '1px solid var(--color-divider)', padding: 8, flexWrap: 'nowrap' }}>
+      <Icon name="file" size={18} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, overflowWrap: 'anywhere' }}>{label}</div>
+        <div className="small muted-2">
+          {s.role === 'created' ? 'Created this transaction' : `Matched as duplicate${s.match_score ? ` (${Math.round(Number(s.match_score) * 100)}%)` : ''}`}
+          {s.origin && s.filename ? ` · ${ORIGINS[s.origin] ?? s.origin}` : ''} · {shortDate(s.created_at)}
+        </div>
+        {differs && (
+          <div className="small muted-2">
+            Recorded as: {s.txn_date ? shortDate(s.txn_date) : ''} {s.description} {s.amount !== null ? money(s.amount) : ''}
+          </div>
+        )}
+      </div>
+      {s.attachment_id && s.filename && (
+        <a className="btn btn-ghost small" href={`/api/attachments/${s.attachment_id}/content`} target="_blank" rel="noreferrer">Open</a>
+      )}
+      {s.import_batch_id && <Link className="btn btn-ghost small" to={`/import/${s.import_batch_id}`}>Import</Link>}
+    </div>
+  )
+}
+
+function NotesSection({ txnId }: { txnId: number }) {
+  const qc = useQueryClient()
+  const key = ['transactions', 'notes', txnId]
+  const notes = useQuery({ queryKey: key, queryFn: () => get<TxnNote[]>(`/transactions/${txnId}/notes`) })
+  const [text, setText] = useState('')
+  const [editing, setEditing] = useState<{ id: number; body: string } | null>(null)
+  const refresh = () => qc.invalidateQueries({ queryKey: key })
+  const add = useMutation({
+    mutationFn: () => post<TxnNote>(`/transactions/${txnId}/notes`, { body: text }),
+    onSuccess: () => { setText(''); refresh() },
+  })
+  const save = useMutation({
+    mutationFn: (n: { id: number; body: string }) => patch<TxnNote>(`/transactions/${txnId}/notes/${n.id}`, { body: n.body }),
+    onSuccess: () => { setEditing(null); refresh() },
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) => del(`/transactions/${txnId}/notes/${id}`),
+    onSuccess: refresh,
+  })
+  return (
+    <div className="section-rule">
+      <div className="card-kicker">More notes</div>
+      {(notes.data ?? []).map((n) => (
+        <div key={n.id} style={{ borderLeft: '2px solid var(--color-divider)', paddingLeft: 8 }}>
+          {editing?.id === n.id ? (
+            <>
+              <textarea className="input" style={{ minHeight: 48 }} value={editing.body}
+                onChange={(e) => setEditing({ id: n.id, body: e.target.value })} />
+              <div className="row small" style={{ gap: 6 }}>
+                <Button variant="ghost" className="small" disabled={!editing.body.trim() || save.isPending} onClick={() => save.mutate(editing)}>Save</Button>
+                <Button variant="ghost" className="small" onClick={() => setEditing(null)}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{n.body}</div>
+              <div className="row small muted-2" style={{ gap: 8 }}>
+                <span>{n.source === 'import' ? `From ${n.filename ?? 'an import'}` : 'Added by you'} · {shortDate(n.created_at)}</span>
+                <button type="button" className="link-btn" onClick={() => setEditing({ id: n.id, body: n.body })}>Edit</button>
+                <button type="button" className="link-btn" disabled={remove.isPending}
+                  onClick={() => confirm('Delete this note?') && remove.mutate(n.id)}>Delete</button>
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+      <textarea className="input" style={{ minHeight: 48 }} placeholder="Add a note…" value={text} onChange={(e) => setText(e.target.value)} />
+      <Button className="btn-block" style={{ margin: 0 }} disabled={!text.trim() || add.isPending} onClick={() => add.mutate()}>
+        {add.isPending ? 'Adding…' : 'Add note'}
+      </Button>
+      <ErrorNote error={notes.error || add.error || save.error || remove.error} />
+    </div>
+  )
+}
+
 export function TransactionDetail({ txn, defaultAccountId, standalone = false, onClose, onSaved }: Props) {
   const qc = useQueryClient()
   const accounts = useAccounts()
@@ -62,6 +146,11 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
   const stmts = useQuery({
     queryKey: ['statements', 'for', txn?.id],
     queryFn: () => get<Statement[]>(`/statements/for-transaction/${txn!.id}`),
+    enabled: !isNew,
+  })
+  const sources = useQuery({
+    queryKey: ['transactions', 'sources', txn?.id],
+    queryFn: () => get<TxnSource[]>(`/transactions/${txn!.id}/sources`),
     enabled: !isNew,
   })
   const fileInput = useRef<HTMLInputElement>(null)
@@ -199,6 +288,8 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
         <textarea className="input" style={{ minHeight: 56 }} value={draft.notes} onChange={(e) => set('notes', e.target.value)} />
       </Field>
 
+      {!isNew && <NotesSection txnId={txn.id} />}
+
       {(tags.data?.length ?? 0) > 0 && (
         <div className="section-rule">
           <div className="card-kicker">Tags</div>
@@ -263,6 +354,18 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
 
       {!isNew && (
         <div className="section-rule">
+          <div className="card-kicker">Sources</div>
+          {(sources.data ?? []).length === 0 ? (
+            <div className="small muted-2">
+              {txn.source_type === 'manual' ? 'Entered by hand; no imported records match it yet.' : 'No import records for this transaction.'}
+              {txn.import_batch_id && <> <Link to={`/import/${txn.import_batch_id}`}>Import #{txn.import_batch_id}</Link></>}
+            </div>
+          ) : (sources.data ?? []).map((s) => <SourceRow key={s.id} s={s} txn={txn} />)}
+        </div>
+      )}
+
+      {!isNew && (
+        <div className="section-rule">
           <div className="card-kicker">Duplicate check</div>
           <div className="small muted-2">
             {(dups.data ?? []).length === 0 ? 'No duplicate candidates recorded.' : (dups.data ?? []).map((p) => {
@@ -273,9 +376,6 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
                 {other.account_name ? ` (${other.account_name})` : ''}</div>
             })}
           </div>
-          {txn.import_batch_id && (
-            <Link className="small" to={`/import/${txn.import_batch_id}`}>Imported in batch #{txn.import_batch_id}</Link>
-          )}
         </div>
       )}
 

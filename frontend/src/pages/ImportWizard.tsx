@@ -493,7 +493,7 @@ function ReviewStep({ b }: { b: BatchDetail }) {
         <div className="card-title">{b.filename}</div>
         <div className="grid-3">
           <div><div className="stat-n">{inserted}</div><div className="text-muted small">{committed ? 'rows inserted' : 'rows to insert'}</div></div>
-          <div><div className="stat-n">{d.skip_duplicate ?? 0}</div><div className="text-muted small">duplicates skipped</div></div>
+          <div><div className="stat-n">{d.skip_duplicate ?? 0}</div><div className="text-muted small">{committed ? 'duplicates linked to existing' : 'duplicates to link'}</div></div>
           <div><div className="stat-n">{d.keep ?? 0}</div><div className="text-muted small">kept as separate</div></div>
         </div>
         {(d.pending ?? 0) > 0 && <div className="callout">{d.pending} undecided possible duplicates will be skipped.</div>}
@@ -514,7 +514,8 @@ function ReviewStep({ b }: { b: BatchDetail }) {
         )}
         <div className="card-body">
           The source file is stored in Postgres with the batch (sha-256 deduplicated) so every transaction links back to its
-          origin. The import can be rolled back as a unit.
+          origin. Duplicate rows aren't inserted again; the file is added as another source on the matching transaction,
+          along with any notes or statement details on the row. The import can be rolled back as a unit.
         </div>
         {committed && <span className="tag tag-accent" style={{ alignSelf: 'flex-start' }}>Committed · batch #{b.id}
           {b.stats.categorized_by_rule ? ` · ${b.stats.categorized_by_rule} categorized by rule` : ''}</span>}

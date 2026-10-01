@@ -21,6 +21,7 @@ router = APIRouter(tags=["system"])
 # file name -> query; views keep names instead of ids where that reads better in a spreadsheet
 EXPORTS = {
     "transactions.csv": "SELECT * FROM v_transactions ORDER BY date, id",
+    "transaction_notes.csv": "SELECT * FROM v_transaction_notes ORDER BY date, transaction_id, created_at",
     "accounts.csv": """--sql
         SELECT a.id, a.name, a.account_type, i.name AS institution, a.mask, a.is_hidden, a.is_closed, a.notes
         FROM account a LEFT JOIN institution i ON i.id = a.institution_id ORDER BY a.id""",

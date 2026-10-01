@@ -49,6 +49,11 @@ class ExtractedTxn(BaseModel):
     date: str = Field(description="Transaction date YYYY-MM-DD (infer the year from the statement period)")
     posted_date: str | None = Field(default=None, description="Posting date YYYY-MM-DD if shown")
     description: str
+    details: str | None = Field(
+        default=None,
+        description="Extra context printed for this line beyond the description (memo, reference/confirmation number, "
+        "payee or payer name, check payee, foreign currency amount and rate, transfer counterpart); null if none",
+    )
     amount: float = Field(description="Signed from the account holder's view: money out negative, money in positive")
     balance: float | None = None
     confidence: float = Field(ge=0, le=1, description="Legibility/extraction confidence for this row")
@@ -77,6 +82,8 @@ Rules:
   and payments to the card are positive.
 - Dates as YYYY-MM-DD; when the statement omits the year, infer it from the statement period (watch Dec/Jan spans).
 - Keep the description text as printed (merchant + location), without the amount.
+- Put any additional lines printed under or beside a transaction (memo, reference numbers, payee, exchange rate)
+  in details, verbatim and joined with "; ". Leave details null rather than repeating the description.
 - confidence < 0.8 when a value is smudged, cut off, or ambiguous."""
 
 

@@ -24,6 +24,7 @@ ALLOWED_VIEWS = {
     "v_monthly_category",
     "v_balances",
     "v_holdings",
+    "v_transaction_notes",
 }
 BLOCKED_FUNCTIONS = {
     "pg_sleep",

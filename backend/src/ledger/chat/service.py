@@ -36,7 +36,10 @@ v_statement_usage(statement_id, series, period_start, period_end, statement_date
 v_budgets(target, target_type, period_type, amount, notes)
 v_balances(account, account_type, institution, as_of, balance, available, source)
   - daily balance history from connected sources; latest per account = max(as_of). Credit cards/loans are debts.
-v_holdings(account, as_of, symbol, description, shares, market_value, cost_basis, currency, source)"""
+v_holdings(account, as_of, symbol, description, shares, market_value, cost_basis, currency, source)
+v_transaction_notes(transaction_id, date, description, amount, account, note, source, document, created_at)
+  - extra notes on a transaction (typed by hand, or details captured from imported statements); join to
+    v_transactions on transaction_id = id."""
 
 SYSTEM = """You are the household's finance analyst for their personal ledger. Answer questions using the run_sql
 tool; never guess numbers. Today is {today}.

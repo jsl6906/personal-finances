@@ -35,6 +35,8 @@ from ledger.models import (
     Institution,
     Tag,
     Transaction,
+    TransactionNote,
+    TransactionSource,
 )
 from ledger.services.categorize import apply_rules
 from ledger.services.merchants import alias_map, canonical
@@ -42,11 +44,12 @@ from ledger.services.normalize import fingerprint, normalize_merchant
 
 log = logging.getLogger(__name__)
 
-DOC_COLUMNS = ["Date", "Posted", "Description", "Amount", "Balance", "Confidence"]
+DOC_COLUMNS = ["Date", "Posted", "Description", "Details", "Amount", "Balance", "Confidence"]
 DOC_MAPPING = {
     "Date": "txn_date",
     "Posted": "posted_date",
     "Description": "description",
+    "Details": "notes",
     "Amount": "amount",
     "Balance": "ignore",
     "Confidence": "ignore",
@@ -412,6 +415,7 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
         )
         .values(status="confirmed_duplicate", decided_at=now)
     )
+    linked = await _record_sources(session, batch, new_txns)
     new_ids = [t.id for _, t in new_txns]
     by_rule = await apply_rules(session, new_ids) if new_ids else 0
 
@@ -426,6 +430,7 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
         **batch.stats,
         "inserted": len(new_ids),
         "skipped_duplicates": counts.get("skip_duplicate", 0),
+        "linked_to_existing": linked,
         "kept_separate": counts.get("keep", 0),
         "invalid": counts.get("invalid", 0),
         "categorized_by_rule": by_rule,
@@ -444,9 +449,84 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
     return {**batch.stats, "uncategorized_ids": list(uncategorized)}
 
 
+async def _record_sources(session: AsyncSession, batch: ImportBatch, new_txns: list[tuple[ImportRow, Transaction]]) -> int:
+    """Link each committed row to the transaction it created or duplicated, and keep row notes on duplicates.
+
+    Returns how many duplicate rows were linked to an existing transaction."""
+    base = {"import_batch_id": batch.id, "attachment_id": batch.attachment_id}
+    values = [
+        {**base, "transaction_id": t.id, "role": "created", "import_row_id": r.id, "txn_date": r.txn_date,
+         "description": r.description, "amount": r.amount, "match_score": None}
+        for r, t in new_txns
+    ]
+    matched = (
+        await session.execute(
+            select(ImportRow, DuplicatePair.txn_a_id, DuplicatePair.score)
+            .join(DuplicatePair, DuplicatePair.import_row_id == ImportRow.id)
+            .join(Transaction, Transaction.id == DuplicatePair.txn_a_id)
+            .where(
+                ImportRow.batch_id == batch.id,
+                ImportRow.decision == "skip_duplicate",
+                DuplicatePair.status == "confirmed_duplicate",
+                Transaction.deleted_at.is_(None),
+            )
+            .order_by(ImportRow.row_index)
+        )
+    ).all()
+    notes: list[tuple[int, str]] = []
+    for r, txn_id, score in matched:
+        values.append(
+            {**base, "transaction_id": txn_id, "role": "matched", "import_row_id": r.id, "txn_date": r.txn_date,
+             "description": r.description, "amount": r.amount, "match_score": score}
+        )
+        # Only the row's own note column; batch-wide default notes add nothing to an existing transaction.
+        body = (_collect(r.raw, batch.mapping).get("notes") or "").strip()
+        if body:
+            notes.append((txn_id, body))
+    for start in range(0, len(values), 1000):
+        await session.execute(insert(TransactionSource).values(values[start : start + 1000]).on_conflict_do_nothing())
+    if notes:
+        await _add_import_notes(session, batch, notes)
+    return len(matched)
+
+
+async def _add_import_notes(session: AsyncSession, batch: ImportBatch, notes: list[tuple[int, str]]) -> None:
+    ids = list({tid for tid, _ in notes})
+    seen: dict[int, set[str]] = defaultdict(set)
+    for tid, body in (
+        await session.execute(
+            select(TransactionNote.transaction_id, TransactionNote.body).where(id_in(TransactionNote.transaction_id, ids))
+        )
+    ).all():
+        seen[tid].add(body.strip())
+    main_notes = dict(
+        (await session.execute(select(Transaction.id, Transaction.notes).where(id_in(Transaction.id, ids)))).all()
+    )
+    for tid, body in notes:
+        if body in seen[tid] or body in (main_notes.get(tid) or ""):
+            continue
+        seen[tid].add(body)
+        session.add(
+            TransactionNote(
+                transaction_id=tid,
+                body=body,
+                source="import",
+                import_batch_id=batch.id,
+                attachment_id=batch.attachment_id,
+            )
+        )
+    await session.flush()
+
+
 async def rollback_batch(session: AsyncSession, batch: ImportBatch) -> int:
     if batch.status != "committed":
         raise ImportError_("Only committed imports can be rolled back")
+    await session.execute(
+        delete(TransactionSource).where(TransactionSource.import_batch_id == batch.id, TransactionSource.role == "matched")
+    )
+    await session.execute(
+        delete(TransactionNote).where(TransactionNote.import_batch_id == batch.id, TransactionNote.source == "import")
+    )
     res = await session.execute(
         update(Transaction)
         .where(Transaction.import_batch_id == batch.id, Transaction.deleted_at.is_(None))
@@ -494,6 +574,7 @@ async def extract_into_batch(session: AsyncSession, batch: ImportBatch) -> dict:
             "Date": t.date,
             "Posted": t.posted_date or "",
             "Description": t.description,
+            "Details": t.details or "",
             "Amount": f"{t.amount:.2f}",
             "Balance": "" if t.balance is None else f"{t.balance:.2f}",
             "Confidence": f"{t.confidence:.2f}",

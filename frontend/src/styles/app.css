@@ -58,6 +58,9 @@ a:hover { color: var(--color-accent-900); }
 .nowrap { white-space: nowrap; }
 .small { font-size: 12px; }
 .muted-2 { color: var(--color-neutral-700); }
+.link-btn { all: unset; cursor: pointer; color: var(--color-accent-700); }
+.link-btn:hover { color: var(--color-accent-900); }
+.link-btn:disabled { cursor: default; opacity: 0.5; }
 .section-rule { border-top: 1px solid var(--color-divider); padding-top: var(--space-3); display: flex;
   flex-direction: column; gap: var(--space-2); }
 

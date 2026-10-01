@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -79,3 +80,55 @@ class Transaction(TimestampMixin, Base):
     merchant_profile: Mapped[MerchantProfile | None] = relationship(
         primaryjoin="foreign(Transaction.merchant) == MerchantProfile.key", viewonly=True, lazy="joined"
     )
+
+
+SOURCE_ROLES = ("created", "matched")
+
+
+class TransactionSource(Base):
+    """A record backing up a transaction: the import row that created it, or a later import row that matched it."""
+
+    __tablename__ = "transaction_source"
+    __table_args__ = (
+        Index(
+            "uq_transaction_source_row",
+            "transaction_id",
+            "import_row_id",
+            unique=True,
+            postgresql_where=text("import_row_id IS NOT NULL"),
+        ),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transaction.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(10))
+    import_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("import_batch.id", ondelete="SET NULL"), index=True
+    )
+    import_row_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("import_row.id", ondelete="SET NULL"))
+    attachment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("attachment.id", ondelete="SET NULL"), index=True
+    )
+    # How this source recorded the transaction (can differ from the ledger row it was matched to).
+    txn_date: Mapped[date | None] = mapped_column(Date)
+    description: Mapped[str | None] = mapped_column(Text)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    match_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TransactionNote(TimestampMixin, Base):
+    """One of any number of notes on a transaction, typed by hand or captured from an imported document."""
+
+    __tablename__ = "transaction_note"
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transaction.id", ondelete="CASCADE"), index=True
+    )
+    body: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(20), default="user", server_default="user")
+    import_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("import_batch.id", ondelete="SET NULL"), index=True
+    )
+    attachment_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("attachment.id", ondelete="SET NULL"))

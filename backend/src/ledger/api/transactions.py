@@ -12,17 +12,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
-from ledger.models import Account, Category, HouseholdMember, Tag, Transaction, transaction_tag
+from ledger.models import (
+    Account,
+    Attachment,
+    Category,
+    HouseholdMember,
+    ImportBatch,
+    Tag,
+    Transaction,
+    TransactionNote,
+    TransactionSource,
+    transaction_tag,
+)
 from ledger.schemas import (
     BulkUpdate,
     IdList,
     JobOut,
+    NoteIn,
     SuggestRequest,
     TagOut,
     TransactionCreate,
     TransactionOut,
     TransactionPage,
     TransactionUpdate,
+    TxnNoteOut,
+    TxnSourceOut,
 )
 from ledger.services import merchants
 from ledger.services.categorize import learn_rule, rule_category
@@ -156,6 +170,7 @@ def _filtered(
                 Transaction.description.ilike(like),
                 Transaction.original_description.ilike(like),
                 Transaction.notes.ilike(like),
+                Transaction.id.in_(select(TransactionNote.transaction_id).where(TransactionNote.body.ilike(like))),
                 cast(Transaction.amount, SAString).like(like.replace("$", "").replace(",", "")),
             )
         )
@@ -335,6 +350,99 @@ async def update_transaction(txn_id: int, body: TransactionUpdate, session: Asyn
 async def delete_transaction(txn_id: int, session: AsyncSession = Depends(get_session)):
     t = await _load(session, txn_id)
     t.deleted_at = datetime.now(UTC)
+    await session.commit()
+    return Response(status_code=204)
+
+
+@router.get("/{txn_id}/sources", response_model=list[TxnSourceOut])
+async def transaction_sources(txn_id: int, session: AsyncSession = Depends(get_session)):
+    await _load(session, txn_id)
+    rows = (
+        await session.execute(
+            select(TransactionSource, ImportBatch.origin, ImportBatch.source_type, Attachment.filename, Attachment.mime_type)
+            .outerjoin(ImportBatch, ImportBatch.id == TransactionSource.import_batch_id)
+            .outerjoin(Attachment, Attachment.id == TransactionSource.attachment_id)
+            .where(TransactionSource.transaction_id == txn_id)
+            .order_by(TransactionSource.role, TransactionSource.created_at, TransactionSource.id)
+        )
+    ).all()
+    return [
+        TxnSourceOut(
+            id=s.id,
+            role=s.role,
+            origin=origin,
+            source_type=source_type,
+            import_batch_id=s.import_batch_id,
+            attachment_id=s.attachment_id,
+            filename=filename,
+            mime_type=mime,
+            txn_date=s.txn_date,
+            description=s.description,
+            amount=s.amount,
+            match_score=s.match_score,
+            created_at=s.created_at,
+        )
+        for s, origin, source_type, filename, mime in rows
+    ]
+
+
+async def _notes(session: AsyncSession, txn_id: int, note_id: int | None = None) -> list[TxnNoteOut]:
+    q = (
+        select(TransactionNote, Attachment.filename)
+        .outerjoin(Attachment, Attachment.id == TransactionNote.attachment_id)
+        .where(TransactionNote.transaction_id == txn_id)
+        .order_by(TransactionNote.created_at, TransactionNote.id)
+        .execution_options(populate_existing=True)
+    )
+    if note_id is not None:
+        q = q.where(TransactionNote.id == note_id)
+    out = []
+    for n, filename in (await session.execute(q)).all():
+        o = TxnNoteOut.model_validate(n)
+        o.filename = filename
+        out.append(o)
+    return out
+
+
+async def _note(session: AsyncSession, txn_id: int, note_id: int) -> TransactionNote:
+    n = await session.get(TransactionNote, note_id)
+    if n is None or n.transaction_id != txn_id:
+        raise HTTPException(404, "Note not found")
+    return n
+
+
+@router.get("/{txn_id}/notes", response_model=list[TxnNoteOut])
+async def list_notes(txn_id: int, session: AsyncSession = Depends(get_session)):
+    await _load(session, txn_id)
+    return await _notes(session, txn_id)
+
+
+@router.post("/{txn_id}/notes", response_model=TxnNoteOut, status_code=201)
+async def add_note(txn_id: int, body: NoteIn, session: AsyncSession = Depends(get_session)):
+    await _load(session, txn_id)
+    body_text = body.body.strip()
+    if not body_text:
+        raise HTTPException(422, "Note is empty")
+    n = TransactionNote(transaction_id=txn_id, body=body_text, source="user")
+    session.add(n)
+    await session.commit()
+    return (await _notes(session, txn_id, n.id))[0]
+
+
+@router.patch("/{txn_id}/notes/{note_id}", response_model=TxnNoteOut)
+async def edit_note(txn_id: int, note_id: int, body: NoteIn, session: AsyncSession = Depends(get_session)):
+    n = await _note(session, txn_id, note_id)
+    body_text = body.body.strip()
+    if not body_text:
+        raise HTTPException(422, "Note is empty")
+    n.body = body_text
+    await session.commit()
+    return (await _notes(session, txn_id, note_id))[0]
+
+
+@router.delete("/{txn_id}/notes/{note_id}", status_code=204)
+async def delete_note(txn_id: int, note_id: int, session: AsyncSession = Depends(get_session)):
+    await session.delete(await _note(session, txn_id, note_id))
     await session.commit()
     return Response(status_code=204)
 

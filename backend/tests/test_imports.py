@@ -218,3 +218,88 @@ async def test_scan_and_decide_duplicate(client, setup, monkeypatch):
     assert (await client.get(f"/api/transactions/{ids[1]}")).status_code == 404
     kept = (await client.get(f"/api/transactions/{ids[0]}")).json()
     assert "Trader Joe's" in kept["notes"]
+
+
+async def test_duplicate_rows_link_document_and_notes(client, setup, monkeypatch):
+    import ledger.jobs.worker as worker
+    from ledger.ai import imports as ai_imports
+
+    async def no_progress(self, fraction, message=None):
+        return None
+
+    monkeypatch.setattr(worker.JobContext, "progress", no_progress)
+    acct = setup["acct"]["id"]
+    existing = (
+        await client.post(
+            "/api/transactions",
+            json={"txn_date": "2026-06-03", "description": "COSTCO WHSE #0412", "amount": "-61.07", "account_id": acct},
+        )
+    ).json()
+
+    async def fake_extract(data, mime_type, filename):
+        return ai_imports.ExtractedStatement(
+            document_type="credit_card_statement",
+            account_last4="9911",
+            sign_note="as printed",
+            summary="June statement",
+            transactions=[
+                ai_imports.ExtractedTxn(
+                    date="2026-06-03", description="COSTCO WHSE #0412", details="Member 1234; 2% reward",
+                    amount=-61.07, confidence=0.99,
+                ),
+                ai_imports.ExtractedTxn(
+                    date="2026-06-05", description="ACME HARDWARE", details="Ref 998877", amount=-12.34, confidence=0.99
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(ai_imports, "extract_statement", fake_extract)
+    b = (await client.post("/api/imports", files={"file": ("june.pdf", b"%PDF-1.7 june", "application/pdf")})).json()
+    await _run("extract_document", {"batch_id": b["id"]})
+    d = (await client.get(f"/api/imports/{b['id']}")).json()
+    assert d["mapping"]["Details"] == "notes"
+    await client.post(f"/api/imports/{b['id']}/prepare", json={"mapping": d["mapping"], "defaults": d["defaults"]})
+    stats = await _run("prepare_import", {"batch_id": b["id"]})
+    assert stats["exact_duplicates"] == 1
+    d = (await client.post(f"/api/imports/{b['id']}/commit", json={})).json()
+    assert d["stats"]["inserted"] == 1 and d["stats"]["linked_to_existing"] == 1
+
+    # The duplicate row is linked to the existing transaction, and its statement details become a note.
+    sources = (await client.get(f"/api/transactions/{existing['id']}/sources")).json()
+    assert [(s["role"], s["filename"], s["origin"]) for s in sources] == [("matched", "june.pdf", "upload")]
+    assert sources[0]["match_score"] == "1.000"
+    notes = (await client.get(f"/api/transactions/{existing['id']}/notes")).json()
+    assert [(n["body"], n["source"], n["filename"]) for n in notes] == [("Member 1234; 2% reward", "import", "june.pdf")]
+
+    acme = (await client.get("/api/transactions", params={"import_batch_id": b["id"]})).json()["items"][0]
+    assert acme["notes"] == "Ref 998877"
+    assert [s["role"] for s in (await client.get(f"/api/transactions/{acme['id']}/sources")).json()] == ["created"]
+
+    # Hand-written notes stack up alongside imported ones and are searchable.
+    r = await client.post(f"/api/transactions/{existing['id']}/notes", json={"body": "  Bulk paper towels  "})
+    assert r.status_code == 201 and r.json()["body"] == "Bulk paper towels" and r.json()["source"] == "user"
+    note_id = r.json()["id"]
+    r = await client.patch(f"/api/transactions/{existing['id']}/notes/{note_id}", json={"body": "Bulk towels + TP"})
+    assert r.json()["body"] == "Bulk towels + TP"
+    assert len((await client.get(f"/api/transactions/{existing['id']}/notes")).json()) == 2
+    found = (await client.get("/api/transactions", params={"q": "towels + TP"})).json()["items"]
+    assert [t["id"] for t in found] == [existing["id"]]
+    assert (await client.delete(f"/api/transactions/{acme['id']}/notes/{note_id}")).status_code == 404
+    assert (await client.delete(f"/api/transactions/{existing['id']}/notes/{note_id}")).status_code == 204
+
+    # Re-importing the same statement adds no second copy of the note.
+    b2 = (await client.post("/api/imports", files={"file": ("june2.pdf", b"%PDF-1.7 june again", "application/pdf")})).json()
+    await _run("extract_document", {"batch_id": b2["id"]})
+    d2 = (await client.get(f"/api/imports/{b2['id']}")).json()
+    await client.post(f"/api/imports/{b2['id']}/prepare", json={"mapping": d2["mapping"], "defaults": d2["defaults"]})
+    await _run("prepare_import", {"batch_id": b2["id"]})
+    await client.post(f"/api/imports/{b2['id']}/commit", json={})
+    sources = (await client.get(f"/api/transactions/{existing['id']}/sources")).json()
+    assert [s["filename"] for s in sources] == ["june.pdf", "june2.pdf"]
+    assert len((await client.get(f"/api/transactions/{existing['id']}/notes")).json()) == 1
+
+    # Rolling back an import drops what it attached to existing transactions.
+    await client.post(f"/api/imports/{b['id']}/rollback")
+    sources = (await client.get(f"/api/transactions/{existing['id']}/sources")).json()
+    assert [s["filename"] for s in sources] == ["june2.pdf"]
+    assert (await client.get(f"/api/transactions/{existing['id']}/notes")).json() == []

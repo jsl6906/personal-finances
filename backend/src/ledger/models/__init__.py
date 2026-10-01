@@ -24,7 +24,7 @@ from ledger.models.reference import (
 from ledger.models.sources import AccountBalance, Holding, Source
 from ledger.models.statements import Statement, StatementSeries, StatementUsage, statement_transaction
 from ledger.models.system import AiCallLog, AppSetting, Job
-from ledger.models.transactions import Transaction, transaction_tag
+from ledger.models.transactions import Transaction, TransactionNote, TransactionSource, transaction_tag
 
 __all__ = [
     "Account",
@@ -60,6 +60,8 @@ __all__ = [
     "StatementUsage",
     "Tag",
     "Transaction",
+    "TransactionNote",
+    "TransactionSource",
     "statement_transaction",
     "transaction_tag",
 ]

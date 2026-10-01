@@ -25,7 +25,9 @@ _STATEMENTS = {
           AND NOT EXISTS (SELECT 1 FROM import_batch x WHERE x.attachment_id = a.id)
           AND NOT EXISTS (SELECT 1 FROM statement x WHERE x.attachment_id = a.id)
           AND NOT EXISTS (SELECT 1 FROM chat_message x WHERE x.attachment_id = a.id)
-          AND NOT EXISTS (SELECT 1 FROM backfill_file x WHERE x.attachment_id = a.id)""",
+          AND NOT EXISTS (SELECT 1 FROM backfill_file x WHERE x.attachment_id = a.id)
+          AND NOT EXISTS (SELECT 1 FROM transaction_source x WHERE x.attachment_id = a.id)
+          AND NOT EXISTS (SELECT 1 FROM transaction_note x WHERE x.attachment_id = a.id)""",
 }
 
 

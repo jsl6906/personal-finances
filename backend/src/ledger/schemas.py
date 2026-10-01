@@ -162,6 +162,37 @@ class TransactionPage(BaseModel):
     total_out: Decimal
 
 
+class TxnSourceOut(BaseModel):
+    id: int
+    role: str
+    origin: str | None
+    source_type: str | None
+    import_batch_id: int | None
+    attachment_id: int | None
+    filename: str | None
+    mime_type: str | None
+    txn_date: date | None
+    description: str | None
+    amount: Decimal | None
+    match_score: Decimal | None
+    created_at: datetime
+
+
+class NoteIn(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class TxnNoteOut(ORM):
+    id: int
+    body: str
+    source: str
+    import_batch_id: int | None
+    attachment_id: int | None
+    filename: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class BulkUpdate(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=5000)
     category_id: int | None = None

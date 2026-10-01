@@ -1,13 +1,13 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.api.imports import _brief
 from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
-from ledger.models import DuplicatePair, Transaction
+from ledger.models import DuplicatePair, Transaction, TransactionNote, TransactionSource
 from ledger.schemas import JobOut, PairDecisionIn, ScanIn, TxnPairOut
 
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
@@ -88,6 +88,14 @@ async def decide(pair_id: int, body: PairDecisionIn, session: AsyncSession = Dep
         if drop.notes and drop.notes not in (keep.notes or ""):
             keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
         keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())
+        await session.execute(
+            update(TransactionSource)
+            .where(TransactionSource.transaction_id == drop_id)
+            .values(transaction_id=keep_id, role="matched", match_score=p.score)
+        )
+        await session.execute(
+            update(TransactionNote).where(TransactionNote.transaction_id == drop_id).values(transaction_id=keep_id)
+        )
         drop.deleted_at = now
         p.status = "confirmed_duplicate"
     p.decided_at = now
