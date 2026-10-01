@@ -44,13 +44,14 @@ from ledger.services.normalize import fingerprint, normalize_merchant
 
 log = logging.getLogger(__name__)
 
-DOC_COLUMNS = ["Date", "Posted", "Description", "Details", "Amount", "Balance", "Confidence"]
+DOC_COLUMNS = ["Date", "Posted", "Description", "Details", "Amount", "Account", "Balance", "Confidence"]
 DOC_MAPPING = {
     "Date": "txn_date",
     "Posted": "posted_date",
     "Description": "description",
     "Details": "notes",
     "Amount": "amount",
+    "Account": "account",
     "Balance": "ignore",
     "Confidence": "ignore",
 }
@@ -224,7 +225,11 @@ def parse_row(raw: dict, mapping: dict[str, str], options: dict, defaults: dict,
     if not description:
         errors.append("Missing description")
 
-    account_id = refs.account(v.get("account")) or defaults.get("account_id")
+    account_id = (
+        (defaults.get("account_map") or {}).get(v.get("account"))
+        or refs.account(v.get("account"))
+        or defaults.get("account_id")
+    )
     category_id = refs.category(v.get("category")) or defaults.get("category_id")
     notes = v.get("notes") or defaults.get("notes") or None
     return {
@@ -307,6 +312,7 @@ async def prepare_batch(session: AsyncSession, batch: ImportBatch, progress=None
     stats = await detect_import_duplicates(session, batch.id)
     stats["category_aliases_learned"] = aliases
     stats["invalid"] = sum(1 for r in rows if r.decision == "invalid")
+    stats["no_account"] = sum(1 for r in rows if r.decision != "invalid" and r.account_id is None)
     batch.stats = {**batch.stats, **stats}
     await session.commit()
     if progress:
@@ -563,12 +569,51 @@ async def _suggest_account(session: AsyncSession, institution: str | None, last4
     return None
 
 
+def _reconcile(total: Decimal, opening: float | None, closing: float | None) -> dict | None:
+    if opening is None or closing is None:
+        return None
+    change = Decimal(str(closing)) - Decimal(str(opening))
+    return {
+        "sum_of_rows": f"{total:.2f}",
+        "balance_change": f"{change:.2f}",
+        "reconciles": abs(abs(change) - abs(total)) < Decimal("0.02"),
+    }
+
+
+def _row_account(value: str | None, accounts: list[dict]) -> str:
+    """Resolve a transaction's account reference to one of the statement accounts' refs."""
+    if len(accounts) == 1:
+        return accounts[0]["ref"]
+    v = (value or "").strip()
+    for a in accounts:
+        if v.lower() == a["ref"].lower():
+            return a["ref"]
+    digits = "".join(ch for ch in v if ch.isdigit())[-4:]
+    hits = [a for a in accounts if digits and a["last4"] and a["last4"][-4:] == digits]
+    return hits[0]["ref"] if len(hits) == 1 else v
+
+
 async def extract_into_batch(session: AsyncSession, batch: ImportBatch) -> dict:
-    from ledger.ai.imports import extract_statement
+    from ledger.ai.imports import StatementAccount, extract_statement
 
     att = batch.attachment
     content = await session.scalar(select(Attachment.content).where(Attachment.id == att.id))
     result = await extract_statement(content, att.mime_type, att.filename)
+    if not result.transactions:
+        raise ImportError_(f"No transactions found ({result.document_type}: {result.summary})")
+    found = [a for a in result.accounts if a.last4 or a.name]
+    if not found and (result.account_last4 or result.account_name):
+        found = [
+            StatementAccount(
+                last4=result.account_last4,
+                name=result.account_name,
+                account_type=result.account_type,
+                opening_balance=result.opening_balance,
+                closing_balance=result.closing_balance,
+            )
+        ]
+    accounts = [{**a.model_dump(), "ref": (a.last4 or a.name).strip()} for a in found]
+    refs = [_row_account(t.account, accounts) if accounts else "" for t in result.transactions]
     rows = [
         {
             "Date": t.date,
@@ -576,32 +621,54 @@ async def extract_into_batch(session: AsyncSession, batch: ImportBatch) -> dict:
             "Description": t.description,
             "Details": t.details or "",
             "Amount": f"{t.amount:.2f}",
+            "Account": ref,
             "Balance": "" if t.balance is None else f"{t.balance:.2f}",
             "Confidence": f"{t.confidence:.2f}",
         }
-        for t in result.transactions
+        for t, ref in zip(result.transactions, refs, strict=True)
     ]
-    if not rows:
-        raise ImportError_(f"No transactions found ({result.document_type}: {result.summary})")
     await _insert_rows(session, batch, rows)
 
-    total = sum(Decimal(str(t.amount)).quantize(Decimal("0.01")) for t in result.transactions)
-    recon = None
-    if result.opening_balance is not None and result.closing_balance is not None:
-        change = Decimal(str(result.closing_balance)) - Decimal(str(result.opening_balance))
+    amounts = [Decimal(str(t.amount)).quantize(Decimal("0.01")) for t in result.transactions]
+    for a in accounts:
+        mine = [amt for amt, ref in zip(amounts, refs, strict=True) if ref == a["ref"]]
+        a["rows"] = len(mine)
+        a["reconciliation"] = _reconcile(sum(mine, Decimal(0)), a["opening_balance"], a["closing_balance"])
+    checked = [a["reconciliation"] for a in accounts if a["reconciliation"]]
+    if checked:
         recon = {
-            "sum_of_rows": str(total),
-            "balance_change": f"{change:.2f}",
-            "reconciles": abs(abs(change) - abs(total)) < Decimal("0.02"),
+            "sum_of_rows": f"{sum(Decimal(r['sum_of_rows']) for r in checked):.2f}",
+            "balance_change": f"{sum(Decimal(r['balance_change']) for r in checked):.2f}",
+            "reconciles": all(r["reconciles"] for r in checked),
         }
-    meta = result.model_dump(exclude={"transactions"})
-    meta.update({"low_confidence_rows": sum(1 for t in result.transactions if t.confidence < 0.8), "reconciliation": recon})
+    else:
+        recon = _reconcile(sum(amounts, Decimal(0)), result.opening_balance, result.closing_balance)
+    meta = result.model_dump(exclude={"transactions", "accounts"})
+    known = {a["ref"] for a in accounts}
+    meta.update(
+        {
+            "accounts": accounts,
+            "unassigned_rows": sum(1 for ref in refs if ref not in known),
+            "low_confidence_rows": sum(1 for t in result.transactions if t.confidence < 0.8),
+            "reconciliation": recon,
+        }
+    )
     batch.doc_meta = meta
     batch.columns = column_profile(DOC_COLUMNS, rows)
     batch.mapping, batch.mapping_source = dict(DOC_MAPPING), "document"
     batch.options = {"date_format": "auto", "dayfirst": False, "invert_sign": False}
+    # The institution alone only identifies the account when the statement covers just one.
+    institution = result.institution if len(accounts) <= 1 else None
+    account_map = {a["ref"]: await _suggest_account(session, institution, a["last4"]) for a in accounts}
+    if len(accounts) == 1:
+        account_id = account_map[accounts[0]["ref"]]
+    elif not accounts:
+        account_id = await _suggest_account(session, result.institution, None)
+    else:
+        account_id = None
     batch.defaults = {
-        "account_id": await _suggest_account(session, result.institution, result.account_last4),
+        "account_id": account_id,
+        "account_map": account_map,
         "notes": f"Imported from {att.filename}",
     }
     batch.status = "mapping"

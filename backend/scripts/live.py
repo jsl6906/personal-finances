@@ -73,6 +73,12 @@ def main(cmd: str, *args: str) -> None:
                 print(f["id"], c.post(f"/backfill/files/{f['id']}", json={"action": "skip"}).json())
     elif cmd == "backfill-start":
         print(c.post("/backfill/start").json())
+    elif cmd == "backfill-retry":
+        flagged = c.get("/backfill/files", params={"limit": 500, "status": ["review"]}).json()
+        hits = [f for f in flagged if (f["message"] or "").startswith(args[0])]
+        for f in hits:
+            c.post(f"/backfill/files/{f['id']}", json={"action": "retry"}).raise_for_status()
+        print(f"requeued {len(hits)} flagged files starting with {args[0]!r}; run backfill-start to process them")
     elif cmd == "backfill-status":
         ov = c.get("/backfill").json()
         s = ov["summary"]

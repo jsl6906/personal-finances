@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   IMPORT_FIELDS, del, get, post, type BatchDetail, type ImportDefaults, type ImportField, type ImportOptions,
-  type ImportPair, type ImportRow,
+  type ImportPair, type ImportRow, type StatementAccount,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { PairReview } from '../components/PairReview'
@@ -60,7 +60,6 @@ export function ImportWizard() {
 function Wizard({ b }: { b: BatchDetail }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const accounts = useAccounts()
   const members = useMembers()
   const tags = useTags()
   const job = useJob(['extracting', 'preparing'].includes(b.status) ? b.job_id : null)
@@ -70,15 +69,18 @@ function Wizard({ b }: { b: BatchDetail }) {
     date_format: b.options.date_format ?? 'auto', dayfirst: !!b.options.dayfirst, invert_sign: !!b.options.invert_sign,
   })
   const [defaults, setDefaults] = useState<ImportDefaults>({
-    account_id: b.defaults.account_id ?? null, category_id: b.defaults.category_id ?? null,
+    account_id: b.defaults.account_id ?? null, account_map: b.defaults.account_map ?? {},
+    category_id: b.defaults.category_id ?? null,
     member_id: b.defaults.member_id ?? null, notes: b.defaults.notes ?? `Imported from ${b.filename}`,
     tag_ids: b.defaults.tag_ids ?? [],
   })
   const [savePreset, setSavePreset] = useState(b.source_type === 'spreadsheet' && !b.template_name)
   const [presetName, setPresetName] = useState(b.template_name ?? (b.filename ?? '').replace(/\.[^.]+$/, ''))
 
+  const stmtAccounts = b.doc_meta?.accounts ?? []
+  const noAccount = b.status === 'review' ? b.stats.no_account ?? 0 : 0
   const pending = b.decisions.pending ?? 0
-  const defaultStep = b.status === 'review' ? (pending ? 4 : 5) : ['committed', 'rolled_back'].includes(b.status) ? 5
+  const defaultStep = b.status === 'review' ? (noAccount ? 3 : pending ? 4 : 5) : ['committed', 'rolled_back'].includes(b.status) ? 5
     : b.status === 'preparing' ? 3 : 2
   const [step, setStep] = useState(defaultStep)
   const reachable = b.status === 'review' ? 5 : ['committed', 'rolled_back'].includes(b.status) ? 5 : 3
@@ -121,6 +123,10 @@ function Wizard({ b }: { b: BatchDetail }) {
       navigate('/import')
     },
   })
+  const reread = useMutation({
+    mutationFn: () => post<BatchDetail>(`/imports/${b.id}/extract`),
+    onSuccess: (nb) => qc.setQueryData(['import', b.id], nb),
+  })
   const chooseSheet = useMutation({
     mutationFn: (sheet: string) => post<BatchDetail>(`/imports/${b.id}/sheet`, { sheet }),
     onSuccess: (nb) => {
@@ -134,6 +140,7 @@ function Wizard({ b }: { b: BatchDetail }) {
   const mappingOk = fields.has('txn_date') && (fields.has('description') || fields.has('original_description'))
     && (fields.has('amount') || fields.has('debit') || fields.has('credit'))
   const toInsert = (b.decisions.insert ?? 0) + (b.decisions.keep ?? 0)
+  const toLink = (b.decisions.skip_duplicate ?? 0) + pending
 
   const busy = b.status === 'extracting' || b.status === 'preparing'
   const progressCard = busy && (
@@ -263,15 +270,40 @@ function Wizard({ b }: { b: BatchDetail }) {
           <Card style={{ gap: 'var(--space-3)' }}>
             <div className="card-kicker">Defaults</div>
             <div className="card-title">Applied to fields the source doesn't carry</div>
-            <Field label="Account / institution">
-              <select className="input" value={defaults.account_id ?? ''}
-                onChange={(e) => setDefaults({ ...defaults, account_id: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">— none (use the file's account column) —</option>
-                {(accounts.data ?? []).map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}{a.institution_name ? ` · ${a.institution_name}` : ''}{a.mask ? ` ···${a.mask}` : ''}</option>
-                ))}
-              </select>
-            </Field>
+            {noAccount > 0 && (
+              <div className="callout">
+                {noAccount} row{noAccount === 1 ? ' has' : 's have'} no account yet. Choose the account
+                {stmtAccounts.length > 1 ? ' for each account on the statement' : ''} below, then Re-check rows.
+                {isDoc && !b.doc_meta?.accounts && ' This document was read before multi-account statements were'
+                  + ' supported; Re-read document to split its rows by account.'}
+              </div>
+            )}
+            {stmtAccounts.length > 0 && (
+              <Field label={stmtAccounts.length > 1 ? `Accounts on this statement (${stmtAccounts.length})` : 'Account'}>
+                <div className="stack-3">
+                  {stmtAccounts.map((sa) => (
+                    <div key={sa.ref} className="stack" style={{ gap: 4 }}>
+                      {stmtAccounts.length > 1 && (
+                        <div className="small">
+                          {stmtLabel(sa)} <span className="text-muted">· {sa.rows} row{sa.rows === 1 ? '' : 's'}</span>
+                        </div>
+                      )}
+                      <AccountSelect value={defaults.account_map[sa.ref] ?? null} empty="— choose an account —"
+                        onChange={(v) => setDefaults({
+                          ...defaults, account_map: { ...defaults.account_map, [sa.ref]: v },
+                          ...(stmtAccounts.length === 1 ? { account_id: v } : {}),
+                        })} />
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {(stmtAccounts.length === 0 || (b.doc_meta?.unassigned_rows ?? 0) > 0) && (
+              <Field label={stmtAccounts.length ? `Rows not under any account above (${b.doc_meta?.unassigned_rows})` : 'Account / institution'}>
+                <AccountSelect value={defaults.account_id} empty="— none (use the file's account column) —"
+                  onChange={(v) => setDefaults({ ...defaults, account_id: v })} />
+              </Field>
+            )}
             <Field label="Category when unmatched">
               <CategorySelect value={defaults.category_id} emptyLabel="Uncategorized (AI suggests later)"
                 onChange={(v) => setDefaults({ ...defaults, category_id: v })} />
@@ -317,9 +349,11 @@ function Wizard({ b }: { b: BatchDetail }) {
       )}
 
       {!busy && b.status === 'review' && step === 4 && <DuplicateStep b={b} onChanged={refresh} />}
-      {!busy && ['review', 'committed', 'rolled_back'].includes(b.status) && step === 5 && <ReviewStep b={b} />}
+      {!busy && ['review', 'committed', 'rolled_back'].includes(b.status) && step === 5 && (
+        <ReviewStep b={b} noAccount={noAccount} onChooseAccounts={() => setStep(3)} />
+      )}
 
-      <ErrorNote error={prepare.error || commit.error || rollback.error || discard.error || chooseSheet.error} />
+      <ErrorNote error={prepare.error || commit.error || rollback.error || discard.error || chooseSheet.error || reread.error} />
       {!busy && b.status !== 'failed' && (
         <footer className="wizard-foot">
           {!locked && (
@@ -337,8 +371,8 @@ function Wizard({ b }: { b: BatchDetail }) {
             <Button variant="primary" onClick={() => setStep(5)}>{pending ? 'Skip remaining, continue' : 'Continue'}</Button>
           )}
           {step === 5 && b.status === 'review' && (
-            <Button variant="primary" disabled={commit.isPending || toInsert === 0} onClick={() => commit.mutate()}>
-              Commit {toInsert} transactions
+            <Button variant="primary" disabled={commit.isPending || toInsert + toLink === 0} onClick={() => commit.mutate()}>
+              {toInsert || !toLink ? `Commit ${toInsert} transactions` : `Link ${toLink} duplicates`}
             </Button>
           )}
           {b.status === 'committed' && (
@@ -349,8 +383,14 @@ function Wizard({ b }: { b: BatchDetail }) {
                 onClick={() => confirm('Remove every transaction added by this import?') && rollback.mutate()}>Roll back</Button>
             </>
           )}
+          {!locked && isDoc && (
+            <Button variant="ghost" style={{ marginLeft: 'auto' }} disabled={reread.isPending}
+              onClick={() => confirm('Read the document again with Gemini? Mapping and duplicate decisions are reset.') && reread.mutate()}>
+              Re-read document
+            </Button>
+          )}
           {!locked && (
-            <Button variant="ghost" style={{ marginLeft: 'auto' }} disabled={discard.isPending}
+            <Button variant="ghost" style={isDoc ? undefined : { marginLeft: 'auto' }} disabled={discard.isPending}
               onClick={() => confirm('Discard this import? Nothing has been added to the ledger yet.') && discard.mutate()}>
               Discard import
             </Button>
@@ -361,8 +401,30 @@ function Wizard({ b }: { b: BatchDetail }) {
   )
 }
 
+function stmtLabel(sa: StatementAccount) {
+  return [sa.name, sa.last4 ? `···${sa.last4}` : null].filter(Boolean).join(' ') || sa.ref
+}
+
+function AccountSelect({ value, empty, onChange }: { value: number | null; empty: string; onChange: (v: number | null) => void }) {
+  const accounts = useAccounts()
+  return (
+    <select className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
+      <option value="">{empty}</option>
+      {(accounts.data ?? []).map((a) => (
+        <option key={a.id} value={a.id}>{a.name}{a.institution_name ? ` · ${a.institution_name}` : ''}{a.mask ? ` ···${a.mask}` : ''}</option>
+      ))}
+    </select>
+  )
+}
+
 function DocRows({ b }: { b: BatchDetail }) {
   const rows = useQuery({ queryKey: ['import', b.id, 'rows', 'all'], queryFn: () => get<ImportRow[]>(`/imports/${b.id}/rows`, { limit: 1000 }) })
+  const stmtAccounts = b.doc_meta?.accounts ?? []
+  const multi = stmtAccounts.length > 1
+  const label = (ref: string | undefined) => {
+    const sa = stmtAccounts.find((a) => a.ref === ref)
+    return sa ? stmtLabel(sa) : ref || '—'
+  }
   return (
     <Card style={{ gap: 'var(--space-3)' }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -370,14 +432,15 @@ function DocRows({ b }: { b: BatchDetail }) {
         <span className="tag tag-accent">{b.row_count} rows extracted</span>
       </div>
       <table className="table" style={{ fontSize: 13 }}>
-        <thead><tr><th>Date</th><th>Posted</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th><th>Conf.</th></tr></thead>
+        <thead><tr><th>Date</th><th>Posted</th><th>Description</th>{multi && <th>Account</th>}<th style={{ textAlign: 'right' }}>Amount</th><th>Conf.</th></tr></thead>
         <tbody>
           {(rows.data ?? []).map((r) => {
             const conf = Number(r.raw.Confidence ?? 1)
             return (
               <tr key={r.id} className={conf < 0.8 ? 'low-conf' : ''}>
                 <td className="nowrap">{r.raw.Date}</td><td className="nowrap text-muted">{r.raw.Posted}</td>
-                <td>{r.raw.Description}</td><td className="num">{money(r.raw.Amount)}</td>
+                <td>{r.raw.Description}</td>{multi && <td className="nowrap text-muted">{label(r.raw.Account)}</td>}
+                <td className="num">{money(r.raw.Amount)}</td>
                 <td className="small">{Math.round(conf * 100)}%</td>
               </tr>
             )
@@ -394,13 +457,25 @@ function DocRows({ b }: { b: BatchDetail }) {
 function DocMetaCard({ b }: { b: BatchDetail }) {
   const m = b.doc_meta!
   const r = m.reconciliation
+  const multi = (m.accounts?.length ?? 0) > 1
   return (
     <Card style={{ gap: 'var(--space-2)', borderColor: 'var(--color-accent-400)' }}>
       <div className="card-kicker">Read from the document</div>
       <div className="facts">
         <span className="text-muted">Type</span><span>{m.document_type.replaceAll('_', ' ')}</span>
         <span className="text-muted">Institution</span><span>{m.institution ?? '—'}</span>
-        <span className="text-muted">Account</span><span>{m.account_name ?? '—'}{m.account_last4 ? ` ···${m.account_last4}` : ''}</span>
+        {multi ? m.accounts!.map((sa, i) => (
+          <Fragment key={sa.ref}>
+            <span className="text-muted">{i === 0 ? 'Accounts' : ''}</span>
+            <span>
+              {stmtLabel(sa)} · {sa.rows} rows
+              {sa.reconciliation && (sa.reconciliation.reconciles ? ' · reconciles'
+                : ` · rows sum ${money(sa.reconciliation.sum_of_rows)} vs balance change ${money(sa.reconciliation.balance_change)}`)}
+            </span>
+          </Fragment>
+        )) : (
+          <><span className="text-muted">Account</span><span>{m.account_name ?? '—'}{m.account_last4 ? ` ···${m.account_last4}` : ''}</span></>
+        )}
         <span className="text-muted">Period</span><span>{m.period_start ? `${fullDate(m.period_start)} – ${fullDate(m.period_end)}` : '—'}</span>
         <span className="text-muted">Sign convention</span><span>{m.sign_note}</span>
         {r && (<><span className="text-muted">Reconciliation</span>
@@ -474,7 +549,7 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
   )
 }
 
-function ReviewStep({ b }: { b: BatchDetail }) {
+function ReviewStep({ b, noAccount, onChooseAccounts }: { b: BatchDetail; noAccount: number; onChooseAccounts: () => void }) {
   const preview = useQuery({
     queryKey: ['import', b.id, 'rows', 'insert'],
     queryFn: () => get<ImportRow[]>(`/imports/${b.id}/rows`, { decision: 'insert', limit: 6 }),
@@ -497,6 +572,12 @@ function ReviewStep({ b }: { b: BatchDetail }) {
           <div><div className="stat-n">{d.keep ?? 0}</div><div className="text-muted small">kept as separate</div></div>
         </div>
         {(d.pending ?? 0) > 0 && <div className="callout">{d.pending} undecided possible duplicates will be skipped.</div>}
+        {noAccount > 0 && (
+          <div className="callout row" style={{ justifyContent: 'space-between' }}>
+            <span>{noAccount} row{noAccount === 1 ? ' has' : 's have'} no account, which also weakens duplicate matching.</span>
+            <Button onClick={onChooseAccounts}>Choose accounts</Button>
+          </div>
+        )}
         {!committed && (
           <table className="table" style={{ fontSize: 13 }}>
             <thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Category</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>

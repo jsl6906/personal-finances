@@ -57,18 +57,36 @@ class ExtractedTxn(BaseModel):
     amount: float = Field(description="Signed from the account holder's view: money out negative, money in positive")
     balance: float | None = None
     confidence: float = Field(ge=0, le=1, description="Legibility/extraction confidence for this row")
+    account: str | None = Field(
+        default=None,
+        description="The account section this line is listed under: that account's last4 from accounts "
+        "(or its name when no number is printed)",
+    )
+
+
+class StatementAccount(BaseModel):
+    last4: str | None = Field(default=None, description="Last 4 digits of this account's number")
+    name: str | None = Field(
+        default=None, description="Product name as printed, e.g. 'Online Savings' or 'Interest Checking'; not the holder"
+    )
+    account_type: str | None = Field(default=None, description="checking, savings, credit_card, loan, investment, other")
+    opening_balance: float | None = None
+    closing_balance: float | None = None
 
 
 class ExtractedStatement(BaseModel):
     document_type: str = Field(description="bank_statement, credit_card_statement, loan_statement, receipt, bill, other")
     institution: str | None = None
-    account_name: str | None = None
+    account_name: str | None = Field(default=None, description="Product name of the account; not the holder's name")
     account_last4: str | None = None
     account_type: str | None = Field(default=None, description="checking, savings, credit_card, loan, investment, other")
     period_start: str | None = Field(default=None, description="YYYY-MM-DD")
     period_end: str | None = Field(default=None, description="YYYY-MM-DD")
     opening_balance: float | None = None
     closing_balance: float | None = None
+    accounts: list[StatementAccount] = Field(
+        default=[], description="Every account the statement covers, each with its own opening and closing balance"
+    )
     sign_note: str = Field(description="How the source shows charges vs credits and how you converted them")
     summary: str = Field(description="One sentence describing the document")
     transactions: list[ExtractedTxn]
@@ -84,7 +102,11 @@ Rules:
 - Keep the description text as printed (merchant + location), without the amount.
 - Put any additional lines printed under or beside a transaction (memo, reference numbers, payee, exchange rate)
   in details, verbatim and joined with "; ". Leave details null rather than repeating the description.
-- confidence < 0.8 when a value is smudged, cut off, or ambiguous."""
+- confidence < 0.8 when a value is smudged, cut off, or ambiguous.
+- List every account the statement covers in accounts, with its own opening and closing balance, and set each
+  transaction's account to the last4 of the account section it appears under. Combined statements often cover
+  several accounts (checking, savings, CDs) at one institution; for those leave the top-level account fields and
+  balances null. For a single-account statement also fill the top-level account fields and balances."""
 
 
 async def document_part(data: bytes, mime_type: str):

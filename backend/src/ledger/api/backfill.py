@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ledger.config import get_settings
 from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
-from ledger.models import BackfillFile, Job
+from ledger.models import BackfillFile, ImportBatch, Job
 from ledger.models.backfill import BILL_KINDS, STATEMENT_KINDS
 from ledger.schemas import JobOut
 from ledger.sources import archive, backfill
@@ -139,6 +139,9 @@ async def file_action(fid: int, body: FileAction, session: AsyncSession = Depend
             raise HTTPException(409, "Retry the file first so it can be downloaded")
         f.kind, f.status, f.message, f.error = body.kind, "classified", None, None
     else:
+        old = await session.get(ImportBatch, f.import_batch_id) if f.import_batch_id else None
+        if old and old.status != "committed":
+            await session.delete(old)
         f.status = "classified" if f.attachment_id and f.kind else "pending"
         f.error = f.message = None
         f.import_batch_id = f.statement_id = None

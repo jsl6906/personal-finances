@@ -146,6 +146,14 @@ async def classify(session: AsyncSession, bf: BackfillFile) -> None:
         )
 
 
+def mark_done(bf: BackfillFile, stats: dict) -> None:
+    bf.status = "done"
+    bf.detail = {**bf.detail, "inserted": stats["inserted"], "skipped_duplicates": stats["skipped_duplicates"]}
+    bf.message = f"{stats['inserted']} transactions added" + (
+        f", {stats['skipped_duplicates']} duplicates skipped" if stats["skipped_duplicates"] else ""
+    )
+
+
 async def _finish_batch(session: AsyncSession, bf: BackfillFile, batch: ImportBatch, gate: str | None) -> list[int]:
     """Commit a prepared batch unless a check needs a person; returns uncategorized transaction ids."""
     ambiguous = await auto_resolve(session, batch)
@@ -155,12 +163,39 @@ async def _finish_batch(session: AsyncSession, bf: BackfillFile, batch: ImportBa
         bf.status, bf.message = "review", gate
         return []
     stats = await commit_batch(session, batch)
-    bf.status = "done"
-    bf.detail = {**bf.detail, "inserted": stats["inserted"], "skipped_duplicates": stats["skipped_duplicates"]}
-    bf.message = f"{stats['inserted']} transactions added" + (
-        f", {stats['skipped_duplicates']} duplicates skipped" if stats["skipped_duplicates"] else ""
-    )
+    mark_done(bf, stats)
     return stats["uncategorized_ids"]
+
+
+def _account_label(a: dict) -> str:
+    return f"···{a['last4']}" if a.get("last4") else a["ref"]
+
+
+async def _resolve_accounts(session: AsyncSession, batch: ImportBatch) -> None:
+    """Link every account on the statement to a ledger account, creating ones the ledger hasn't seen."""
+    meta = batch.doc_meta or {}
+    inst = meta.get("institution")
+    accounts = meta.get("accounts") or []
+    account_map = dict(batch.defaults.get("account_map") or {})
+    for a in accounts:
+        if account_map.get(a["ref"]) or not (inst and a.get("last4")):
+            continue
+        acct = await ensure_account(
+            session,
+            "statement",
+            FeedAccount(
+                key=f"{inst}|{a['last4']}".lower(),
+                name=" ".join(x for x in (inst, a.get("name"), f"···{a['last4']}") if x),
+                institution=inst,
+                mask=a["last4"],
+                type_hint=a.get("account_type"),
+            ),
+        )
+        account_map[a["ref"]] = acct.id
+    defaults = {**batch.defaults, "account_map": account_map}
+    if len(accounts) == 1 and not defaults.get("account_id"):
+        defaults["account_id"] = account_map.get(accounts[0]["ref"])
+    batch.defaults = defaults
 
 
 async def _import_statement(session: AsyncSession, bf: BackfillFile, att: Attachment) -> list[int]:
@@ -170,30 +205,23 @@ async def _import_statement(session: AsyncSession, bf: BackfillFile, att: Attach
     await session.flush()
     bf.import_batch_id = batch.id
     await extract_into_batch(session, batch)
-    meta = batch.doc_meta or {}
-    if not batch.defaults.get("account_id") and meta.get("institution") and meta.get("account_last4"):
-        inst, last4 = meta["institution"], meta["account_last4"]
-        acct = await ensure_account(
-            session,
-            "statement",
-            FeedAccount(
-                key=f"{inst}|{last4}".lower(),
-                name=f"{inst} ···{last4}",
-                institution=inst,
-                mask=last4,
-                type_hint=meta.get("account_type"),
-            ),
-        )
-        batch.defaults = {**batch.defaults, "account_id": acct.id}
+    await _resolve_accounts(session, batch)
     await prepare_batch(session, batch)
+    meta = batch.doc_meta or {}
+    accounts = meta.get("accounts") or []
+    off = [a for a in accounts if a.get("reconciliation") and not a["reconciliation"]["reconciles"]]
     recon = meta.get("reconciliation")
     gate = None
-    if recon and not recon.get("reconciles"):
+    if off:
+        r = off[0]["reconciliation"]
+        gate = f"{_account_label(off[0])} rows sum to {r['sum_of_rows']} but its balance changed by {r['balance_change']}"
+    elif recon and not recon.get("reconciles"):
         gate = f"Rows sum to {recon['sum_of_rows']} but balances changed by {recon['balance_change']}"
     elif meta.get("low_confidence_rows"):
         gate = f"{meta['low_confidence_rows']} hard-to-read rows to check"
-    elif not batch.defaults.get("account_id"):
-        gate = "Pick the account for this statement"
+    elif batch.stats.get("no_account"):
+        missing = [_account_label(a) for a in accounts if not batch.defaults["account_map"].get(a["ref"])]
+        gate = f"Pick the account for {', '.join(missing)}" if missing else "Pick the account for this statement"
     return await _finish_batch(session, bf, batch, gate)
 
 

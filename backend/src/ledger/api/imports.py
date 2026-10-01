@@ -38,6 +38,7 @@ from ledger.schemas import (
     SheetIn,
     TxnBrief,
 )
+from ledger.sources.backfill import mark_done
 
 router = APIRouter(tags=["imports"])
 
@@ -188,6 +189,19 @@ async def choose_sheet(batch_id: int, body: SheetIn, session: AsyncSession = Dep
     return await _detail(session, await _batch(session, batch_id))
 
 
+@router.post("/imports/{batch_id}/extract", response_model=BatchDetail)
+async def reextract_import(batch_id: int, session: AsyncSession = Depends(get_session)):
+    b = await _batch(session, batch_id)
+    if b.source_type != "document" or b.status not in ("mapping", "review", "failed"):
+        raise HTTPException(409, "Only uncommitted document imports can be re-read")
+    b.status, b.error = "extracting", None
+    job = await enqueue(session, "extract_document", {"batch_id": b.id})
+    b.job_id = job.id
+    await session.commit()
+    notify_worker()
+    return await _detail(session, await _batch(session, batch_id))
+
+
 @router.post("/imports/{batch_id}/prepare", response_model=BatchDetail)
 async def prepare_import(batch_id: int, body: PrepareIn, session: AsyncSession = Depends(get_session)):
     b = await _batch(session, batch_id)
@@ -278,6 +292,9 @@ async def commit_import(batch_id: int, body: CommitIn, session: AsyncSession = D
         raise HTTPException(409, str(exc)) from None
     if result["uncategorized_ids"] and get_settings().gemini_key:
         await enqueue(session, "categorize", {"ids": result["uncategorized_ids"]})
+    bf = await session.scalar(select(BackfillFile).where(BackfillFile.import_batch_id == b.id).limit(1))
+    if bf and bf.status == "review":
+        mark_done(bf, result)
     await enqueue(session, "detect_anomalies", {})
     await session.commit()
     notify_worker()

@@ -255,6 +255,7 @@ class ImportOptions(BaseModel):
 
 class ImportDefaults(BaseModel):
     account_id: int | None = None
+    account_map: dict[str, int | None] = {}
     category_id: int | None = None
     member_id: int | None = None
     notes: str | None = None

@@ -194,6 +194,60 @@ async def test_document_import_with_mocked_extraction(client, setup, monkeypatch
     assert att.status_code == 200 and att.content.startswith(b"%PDF")
 
 
+async def test_combined_statement_splits_rows_by_account(client, setup, monkeypatch):
+    import ledger.jobs.worker as worker
+    from ledger.ai import imports as ai_imports
+
+    async def no_progress(self, fraction, message=None):
+        return None
+
+    monkeypatch.setattr(worker.JobContext, "progress", no_progress)
+    savings = (
+        await client.post("/api/accounts", json={"name": "Combo Savings", "account_type": "savings", "mask": "7064"})
+    ).json()
+
+    async def fake_extract(data, mime_type, filename):
+        txn = ai_imports.ExtractedTxn
+        return ai_imports.ExtractedStatement(
+            document_type="bank_statement",
+            institution="Combo Bank",
+            accounts=[
+                ai_imports.StatementAccount(last4="7064", name="Online Savings", opening_balance=500, closing_balance=510.5),
+                ai_imports.StatementAccount(last4="7065", name="Interest Checking", opening_balance=90, closing_balance=50),
+            ],
+            sign_note="as printed",
+            summary="Combined statement",
+            transactions=[
+                txn(date="2026-05-25", description="COMBO INTEREST PAID", amount=10.5, confidence=0.99, account="7064"),
+                txn(date="2026-05-03", description="COMBO ATM WITHDRAWAL", amount=-40, confidence=0.99, account="x7065"),
+            ],
+        )
+
+    monkeypatch.setattr(ai_imports, "extract_statement", fake_extract)
+    b = (await client.post("/api/imports", files={"file": ("combo.pdf", b"%PDF-1.7 combo", "application/pdf")})).json()
+    await _run("extract_document", {"batch_id": b["id"]})
+    d = (await client.get(f"/api/imports/{b['id']}")).json()
+    accounts = d["doc_meta"]["accounts"]
+    assert [(a["ref"], a["rows"], a["reconciliation"]["reconciles"]) for a in accounts] == [
+        ("7064", 1, True),
+        ("7065", 1, True),
+    ]
+    assert d["defaults"]["account_id"] is None
+    assert d["defaults"]["account_map"] == {"7064": savings["id"], "7065": None}
+
+    # The unknown checking account is left for a person to pick
+    await client.post(f"/api/imports/{b['id']}/prepare", json={"mapping": d["mapping"], "defaults": d["defaults"]})
+    await _run("prepare_import", {"batch_id": b["id"]})
+    assert (await client.get(f"/api/imports/{b['id']}")).json()["stats"]["no_account"] == 1
+
+    defaults = {**d["defaults"], "account_map": {"7064": savings["id"], "7065": setup["other"]["id"]}}
+    await client.post(f"/api/imports/{b['id']}/prepare", json={"mapping": d["mapping"], "defaults": defaults})
+    await _run("prepare_import", {"batch_id": b["id"]})
+    assert (await client.get(f"/api/imports/{b['id']}")).json()["stats"]["no_account"] == 0
+    rows = {r["description"]: r["account_id"] for r in (await client.get(f"/api/imports/{b['id']}/rows")).json()}
+    assert rows == {"COMBO INTEREST PAID": savings["id"], "COMBO ATM WITHDRAWAL": setup["other"]["id"]}
+
+
 async def test_scan_and_decide_duplicate(client, setup, monkeypatch):
     import ledger.jobs.worker as worker
 

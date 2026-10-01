@@ -150,7 +150,8 @@ export const IMPORT_FIELDS: { value: ImportField; label: string }[] = [
 
 export interface ImportOptions { date_format: string; dayfirst: boolean; invert_sign: boolean }
 export interface ImportDefaults {
-  account_id: number | null; category_id: number | null; member_id: number | null; notes: string | null; tag_ids: number[]
+  account_id: number | null; account_map: Record<string, number | null>; category_id: number | null
+  member_id: number | null; notes: string | null; tag_ids: number[]
 }
 
 export interface BatchSummary {
@@ -160,12 +161,19 @@ export interface BatchSummary {
   created_at: string; committed_at: string | null
 }
 
+export interface Reconciliation { sum_of_rows: string; balance_change: string; reconciles: boolean }
+export interface StatementAccount {
+  ref: string; last4: string | null; name: string | null; account_type: string | null
+  opening_balance: number | null; closing_balance: number | null; rows: number; reconciliation: Reconciliation | null
+}
+
 export interface DocMeta {
   document_type: string; institution: string | null; account_name: string | null; account_last4: string | null
   account_type: string | null; period_start: string | null; period_end: string | null
   opening_balance: number | null; closing_balance: number | null; sign_note: string; summary: string
   low_confidence_rows: number
-  reconciliation: { sum_of_rows: string; balance_change: string; reconciles: boolean } | null
+  reconciliation: Reconciliation | null
+  accounts?: StatementAccount[]; unassigned_rows?: number
 }
 
 export interface BatchDetail extends BatchSummary {
