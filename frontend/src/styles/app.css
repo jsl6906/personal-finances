@@ -103,6 +103,7 @@ select.input { appearance: auto; }
 .step { border-top: 2px solid var(--color-divider); padding-top: 8px; display: flex; gap: 8px; align-items: baseline;
   color: var(--color-neutral-600); }
 .step.clickable { cursor: pointer; }
+fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 .step.done { border-top-color: var(--color-accent-400); color: var(--color-accent-700); }
 .step.on { border-top-color: var(--color-accent); color: var(--color-text); }
 .step-n { font-family: var(--font-heading); font-weight: 600; font-size: 18px; }

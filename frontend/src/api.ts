@@ -176,7 +176,13 @@ export interface DocMeta {
   accounts?: StatementAccount[]; unassigned_rows?: number
 }
 
+export interface BatchSource {
+  mime_type: string | null; size_bytes: number | null; sha256: string | null; uploaded_at: string | null
+  archive_provider: string | null; archive_path: string | null; archive_kind: string | null; archive_modified_at: string | null
+}
+
 export interface BatchDetail extends BatchSummary {
+  source: BatchSource
   attachment_id: number | null; sheet_name: string | null; sheets: string[]
   columns: { name: string; samples: string[] }[]; mapping: Record<string, ImportField>; mapping_source: string | null
   options: Partial<ImportOptions>; defaults: Partial<ImportDefaults>; doc_meta: DocMeta | null

@@ -136,7 +136,15 @@ def _filtered(
 ) -> list:
     conds = [Transaction.deleted_at.is_(None)]
     if import_batch_id:
-        conds.append(Transaction.import_batch_id == import_batch_id)
+        # Batches that only matched existing transactions create nothing; include their linked sources.
+        conds.append(
+            or_(
+                Transaction.import_batch_id == import_batch_id,
+                Transaction.id.in_(
+                    select(TransactionSource.transaction_id).where(TransactionSource.import_batch_id == import_batch_id)
+                ),
+            )
+        )
     if merchant:
         conds.append(func.coalesce(Transaction.merchant, func.lower(Transaction.description)) == merchant)
     if start:

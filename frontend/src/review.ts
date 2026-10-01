@@ -2,6 +2,8 @@ import { fullDate } from './format'
 
 export const STEP_NAMES = ['Source', 'Map columns', 'Defaults', 'Duplicates', 'Review']
 
+export const ORIGINS: Record<string, string> = { upload: 'Upload', backfill: 'Drive archive', tiller: 'Tiller', simplefin: 'SimpleFIN' }
+
 export const STATUS_TAG: Record<string, string> = {
   extracting: 'tag-outline', mapping: 'tag-outline', preparing: 'tag-outline', review: 'tag-outline',
   committed: 'tag-accent', rolled_back: 'tag-neutral', failed: 'tag-neutral',

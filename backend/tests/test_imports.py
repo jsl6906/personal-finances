@@ -114,9 +114,12 @@ async def test_spreadsheet_import_flow(client, setup, monkeypatch):
     assert d["stats"]["inserted"] == 2 and d["stats"]["skipped_duplicates"] == 1 and d["stats"]["kept_separate"] == 1
 
     page = (await client.get("/api/transactions", params={"import_batch_id": b["id"]})).json()
-    assert page["total"] == 2
-    assert all(t["account_name"] == "Import Card" and t["notes"] == "Imported" for t in page["items"])
-    netflix = next(t for t in page["items"] if t["description"] == "NETFLIX.COM")
+    # 2 inserted + the existing transaction the skipped duplicate row was linked to.
+    assert page["total"] == 3
+    created = [t for t in page["items"] if t["import_batch_id"] == b["id"]]
+    assert len(created) == 2
+    assert all(t["account_name"] == "Import Card" and t["notes"] == "Imported" for t in created)
+    netflix = next(t for t in created if t["description"] == "NETFLIX.COM")
     assert netflix["category_name"] == "Books, Amusement, & Entertainment"
 
     # The kept pair is remembered and not re-flagged by a scan
@@ -325,7 +328,9 @@ async def test_duplicate_rows_link_document_and_notes(client, setup, monkeypatch
     notes = (await client.get(f"/api/transactions/{existing['id']}/notes")).json()
     assert [(n["body"], n["source"], n["filename"]) for n in notes] == [("Member 1234; 2% reward", "import", "june.pdf")]
 
-    acme = (await client.get("/api/transactions", params={"import_batch_id": b["id"]})).json()["items"][0]
+    batch_items = (await client.get("/api/transactions", params={"import_batch_id": b["id"]})).json()["items"]
+    assert {t["id"] for t in batch_items} >= {existing["id"]} and len(batch_items) == 2
+    acme = next(t for t in batch_items if t["id"] != existing["id"])
     assert acme["notes"] == "Ref 998877"
     assert [s["role"] for s in (await client.get(f"/api/transactions/{acme['id']}/sources")).json()] == ["created"]
 

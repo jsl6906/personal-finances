@@ -8,6 +8,7 @@ import { Button, Card, ErrorNote, Field, Icon } from '../components/ui'
 import { fullDate, iso, money, monthName, parseIso, shortDate } from '../format'
 import { useAccounts, useMembers, useTags } from '../hooks'
 import { accountPath, categoryPath, merchantKey, merchantPath, txnPath } from '../links'
+import { ORIGINS } from '../review'
 
 type Draft = {
   txn_date: string
@@ -46,8 +47,6 @@ type Props = {
   onClose: () => void
   onSaved: (t: Transaction) => void
 }
-
-const ORIGINS: Record<string, string> = { upload: 'Upload', backfill: 'Drive archive', tiller: 'Tiller', simplefin: 'SimpleFIN' }
 
 function SourceRow({ s, txn }: { s: TxnSource; txn: Transaction }) {
   const label = s.filename ?? `${ORIGINS[s.origin ?? ''] ?? s.origin ?? 'Import'}${s.source_type === 'spreadsheet' ? ' sheet' : ''}`

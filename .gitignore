@@ -10,3 +10,6 @@ __pycache__/
 node_modules/
 frontend/dist/
 *.log
+/logs/
+/design_docs/
+/app_guidelines.md

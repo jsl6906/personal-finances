@@ -9,8 +9,9 @@ import { CategorySelect } from '../components/CategorySelect'
 import { PairReview } from '../components/PairReview'
 import { Button, Card, ErrorNote, Field, ProgressBar } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
+import { txnPath } from '../links'
 import { useAccounts, useJob, useMembers, useTags } from '../hooks'
-import { STATUS_TAG, briefFacts, pairConfidence } from '../review'
+import { ORIGINS, STATUS_TAG, briefFacts, pairConfidence } from '../review'
 import { Steps } from './Import'
 
 const DATE_FORMATS = [
@@ -166,7 +167,12 @@ function Wizard({ b }: { b: BatchDetail }) {
         </div>
         <Link to="/import" className="btn btn-ghost">All imports</Link>
       </header>
-      <Steps current={step} reachable={busy ? 0 : reachable} onGo={locked ? undefined : (n) => (n === 1 ? navigate('/import') : setStep(n))} />
+      <Steps current={step} reachable={busy ? 0 : reachable} onGo={setStep} />
+      {locked && step > 1 && step < 5 && (
+        <div className="callout">
+          This import was {b.status === 'committed' ? 'committed' : 'rolled back'}; this step is shown read-only as it was processed.
+        </div>
+      )}
 
       {b.status === 'failed' && (
         <div className="callout error">
@@ -178,7 +184,10 @@ function Wizard({ b }: { b: BatchDetail }) {
       )}
       {progressCard}
 
+      {!busy && step === 1 && <SourceStep b={b} />}
+
       {!busy && b.status !== 'failed' && step === 2 && (
+        <fieldset className="plain" disabled={locked}>
         <div className="grid-main-side wide-side">
           {isDoc ? <DocRows b={b} /> : (
             <Card style={{ gap: 'var(--space-3)' }}>
@@ -263,9 +272,11 @@ function Wizard({ b }: { b: BatchDetail }) {
             {isDoc && b.doc_meta && <DocMetaCard b={b} />}
           </div>
         </div>
+        </fieldset>
       )}
 
       {!busy && b.status !== 'failed' && step === 3 && (
+        <fieldset className="plain" disabled={locked}>
         <div className="grid-2" style={{ alignItems: 'start' }}>
           <Card style={{ gap: 'var(--space-3)' }}>
             <div className="card-kicker">Defaults</div>
@@ -346,9 +357,11 @@ function Wizard({ b }: { b: BatchDetail }) {
             </Card>
           </div>
         </div>
+        </fieldset>
       )}
 
       {!busy && b.status === 'review' && step === 4 && <DuplicateStep b={b} onChanged={refresh} />}
+      {locked && step === 4 && <DuplicateHistory b={b} />}
       {!busy && ['review', 'committed', 'rolled_back'].includes(b.status) && step === 5 && (
         <ReviewStep b={b} noAccount={noAccount} onChooseAccounts={() => setStep(3)} />
       )}
@@ -358,6 +371,9 @@ function Wizard({ b }: { b: BatchDetail }) {
         <footer className="wizard-foot">
           {!locked && (
             <Button onClick={() => (step <= 2 ? navigate('/import') : setStep(step - 1))}>Back</Button>
+          )}
+          {step === 1 && !locked && (
+            <Button variant="primary" onClick={() => setStep(2)}>Continue</Button>
           )}
           {step === 2 && !locked && (
             <Button variant="primary" disabled={!mappingOk} onClick={() => setStep(3)}>Continue</Button>
@@ -414,6 +430,45 @@ function AccountSelect({ value, empty, onChange }: { value: number | null; empty
         <option key={a.id} value={a.id}>{a.name}{a.institution_name ? ` · ${a.institution_name}` : ''}{a.mask ? ` ···${a.mask}` : ''}</option>
       ))}
     </select>
+  )
+}
+
+function fileSize(n: number) {
+  return n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`
+}
+
+function SourceStep({ b }: { b: BatchDetail }) {
+  const s = b.source
+  return (
+    <div className="grid-main-side">
+      <Card style={{ gap: 'var(--space-3)' }}>
+        <div className="card-kicker">Source · batch #{b.id}</div>
+        <div className="card-title">{b.filename ?? `${ORIGINS[b.origin] ?? b.origin} feed`}</div>
+        <div className="facts">
+          <span className="text-muted">Type</span>
+          <span>{b.source_type === 'document' ? 'Document (read by Gemini)' : 'Spreadsheet'}{s.mime_type ? ` · ${s.mime_type}` : ''}</span>
+          <span className="text-muted">Origin</span><span>{ORIGINS[b.origin] ?? b.origin}</span>
+          {s.archive_path && (<><span className="text-muted">Archive path</span>
+            <span>{s.archive_provider ? `${s.archive_provider}: ` : ''}{s.archive_path}</span></>)}
+          {s.archive_kind && (<><span className="text-muted">Classified as</span><span>{s.archive_kind.replaceAll('_', ' ')}</span></>)}
+          {s.archive_modified_at && (<><span className="text-muted">File modified</span><span>{fullDate(s.archive_modified_at)}</span></>)}
+          {s.size_bytes !== null && (<><span className="text-muted">Size</span><span>{fileSize(s.size_bytes)}</span></>)}
+          {b.sheet_name && (<><span className="text-muted">Sheet</span>
+            <span>{b.sheet_name}{b.sheets.length > 1 ? ` (of ${b.sheets.length})` : ''}</span></>)}
+          <span className="text-muted">Rows</span><span>{b.row_count}</span>
+          <span className="text-muted">Imported</span><span>{fullDate(s.uploaded_at ?? b.created_at)}</span>
+          <span className="text-muted">Status</span>
+          <span><span className={`tag ${STATUS_TAG[b.status]}`}>{b.status.replace('_', ' ')}</span>
+            {b.committed_at ? ` · committed ${fullDate(b.committed_at)}` : ''}</span>
+          {s.sha256 && (<><span className="text-muted">SHA-256</span>
+            <span className="small" title={s.sha256} style={{ fontFamily: 'monospace' }}>{s.sha256.slice(0, 16)}…</span></>)}
+        </div>
+        {b.attachment_id && (
+          <a className="small" href={`/api/attachments/${b.attachment_id}/content`} target="_blank" rel="noreferrer">Open source file</a>
+        )}
+      </Card>
+      {b.source_type === 'document' && b.doc_meta && <DocMetaCard b={b} />}
+    </div>
   )
 }
 
@@ -482,7 +537,7 @@ function DocMetaCard({ b }: { b: BatchDetail }) {
           <span>{r.reconciles ? 'Rows match the balance change' : `Rows sum ${money(r.sum_of_rows)} vs balance change ${money(r.balance_change)}`}</span></>)}
       </div>
       {m.low_confidence_rows > 0 && <div className="small">{m.low_confidence_rows} rows need a look (highlighted).</div>}
-      <div className="card-meta">{m.summary} Edit defaults on the next step; the document stays attached to the batch.</div>
+      <div className="card-meta">{m.summary} The document stays attached to the batch.</div>
     </Card>
   )
 }
@@ -546,6 +601,43 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
       )}
       <ErrorNote error={decide.error || pairs.error} />
     </div>
+  )
+}
+
+const OUTCOME: Record<string, string> = { skip_duplicate: 'Linked to existing', keep: 'Kept both', pending: 'Undecided' }
+
+function DuplicateHistory({ b }: { b: BatchDetail }) {
+  const pairs = useQuery({ queryKey: ['import', b.id, 'pairs'], queryFn: () => get<ImportPair[]>(`/imports/${b.id}/duplicates`) })
+  const list = pairs.data ?? []
+  const exact = b.stats.exact_duplicates ?? 0
+  if (pairs.isLoading) return null
+  return (
+    <Card style={{ gap: 'var(--space-3)' }}>
+      <div className="card-kicker">Duplicate review</div>
+      <div className="card-title">{list.length ? `${list.length} possible duplicate${list.length === 1 ? '' : 's'} reviewed` : 'No possible duplicates were flagged'}</div>
+      {exact > 0 && <div className="small text-muted">{exact} exact duplicates of existing transactions were skipped automatically.</div>}
+      {list.length > 0 && (
+        <table className="table" style={{ fontSize: 13 }}>
+          <thead>
+            <tr><th>Row</th><th>Incoming</th><th style={{ textAlign: 'right' }}>Amount</th><th>Already in ledger</th>
+              <th>Match</th><th>Outcome</th></tr>
+          </thead>
+          <tbody>
+            {list.map((p) => (
+              <tr key={p.id} title={p.ai_reason ? `${p.ai_reason} (${p.reasons.join(' · ')})` : p.reasons.join(' · ')}>
+                <td className="text-muted">{p.row.row_index + 1}</td>
+                <td>{shortDate(p.row.txn_date)} · {p.row.description}</td>
+                <td className="num">{money(p.row.amount)}</td>
+                <td><Link to={txnPath(p.existing.id)}>{shortDate(p.existing.txn_date)} · {p.existing.description}</Link></td>
+                <td className="nowrap small">{pairConfidence(p.score, p.ai_probability)}</td>
+                <td className="nowrap">{OUTCOME[p.row.decision] ?? p.row.decision}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <ErrorNote error={pairs.error} />
+    </Card>
   )
 }
 
