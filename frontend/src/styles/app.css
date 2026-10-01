@@ -129,6 +129,24 @@ select.input { appearance: auto; }
 
 .topbar, .nav-backdrop { display: none; }
 
+.tip {
+  position: fixed; z-index: 100; pointer-events: none; width: 380px; max-width: calc(100vw - 24px);
+  background: var(--color-bg); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md);
+  padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.tip-title { font-weight: 600; font-size: 13px; }
+.tip-body { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.tip table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tip th { text-align: left; font-weight: 500; color: var(--color-neutral-600); border-bottom: 1px solid var(--color-divider); }
+.tip th, .tip td { padding: 2px 4px; }
+.tip .num { text-align: right; white-space: nowrap; }
+.tip-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mh-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: center; gap: var(--space-2);
+  border-bottom: 1px solid var(--color-divider); }
+.mh-row:last-child { border-bottom: 0; }
+.mh-label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+
 @media (max-width: 1100px) {
   .main { padding: var(--space-6); }
 }
@@ -160,6 +178,7 @@ select.input { appearance: auto; }
   .grid-2, .grid-3, .split-nav, .chat-layout, .grid-main-side, .grid-main-side.wide-side,
   .tx-layout.with-detail { grid-template-columns: minmax(0, 1fr); }
   .grid-kpi { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); }
+  .mh-row { grid-template-columns: minmax(0, 1fr); gap: 0; padding-top: var(--space-2); }
   .kpi-value { font-size: 26px; }
   .big-amount { font-size: 28px; }
 

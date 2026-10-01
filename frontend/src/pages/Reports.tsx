@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { get, post, type CashflowMonth, type CategoryRow, type Job, type Merchant, type Trend } from '../api'
-import { seriesColor } from '../chartUtils'
-import { AnomalyList } from '../components/AnomalyList'
-import { CashflowChart, Legend, TrendChart } from '../components/Charts'
+import { get, type CashflowMonth, type CategoryRow, type Merchant, type Trend } from '../api'
+import { stackColor } from '../chartUtils'
+import { Legend, NET_DOWN, NET_UP, NetChart, SeriesHistory, StackedBars } from '../components/Charts'
 import { Button, Card, ErrorNote, Seg } from '../components/ui'
-import { iso, money, parseIso, shortDate } from '../format'
-import { useAnomalies, useJob } from '../hooks'
+import { iso, money, moneyRound, monthEnd, parseIso, shortDate } from '../format'
 import { categoryPath, groupPath, merchantPath } from '../links'
+import { tipHandlers, useTip, type TipSpec } from '../tip'
 
 type Range = '12m' | '24m' | 'ytd' | 'last_year' | 'all' | 'years'
 
@@ -28,15 +27,16 @@ function rangeDates(r: Range, firstYear: number, fromYear: number, toYear: numbe
   }
 }
 
-const monthEnd = (m: string) => { const d = parseIso(m); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)) }
-
 export function Reports() {
-  const qc = useQueryClient()
+  const tip = useTip()
   const [params, setParams] = useSearchParams()
   const [range, setRange] = useState<Range>('12m')
-  const [level, setLevel] = useState<'group' | 'category'>('group')
-  const [anomalyStatus, setAnomalyStatus] = useState<'open' | 'reviewed' | 'dismissed'>('open')
-  const [jobId, setJobId] = useState<number | null>(null)
+  const [histLevel, setHistLevel] = useState<'group' | 'category'>('group')
+  const [histKind, setHistKind] = useState<'expense' | 'income'>('expense')
+  const [histAll, setHistAll] = useState(false)
+  const [netMode, setNetMode] = useState<'waterfall' | 'monthly'>('waterfall')
+  const [incLevel, setIncLevel] = useState<'group' | 'category'>('category')
+  const [expLevel, setExpLevel] = useState<'group' | 'category'>('group')
   const [thisYear] = useState(() => new Date().getFullYear())
   const span = useQuery({ queryKey: ['analytics', 'span'], queryFn: () => get<{ start: string | null; end: string | null }>('/analytics/span') })
   const firstYear = span.data?.start ? Number(span.data.start.slice(0, 4)) : thisYear
@@ -52,29 +52,30 @@ export function Reports() {
     queryKey: ['analytics', 'categories', focus.start, focus.end],
     queryFn: () => get<{ rows: CategoryRow[] }>('/analytics/categories', focus),
   })
-  const trend = useQuery({
-    queryKey: ['analytics', 'trend', start, end, level],
-    queryFn: () => get<Trend>('/analytics/category-trend', { start, end, level, top: 6 }),
+  const hist = useQuery({
+    queryKey: ['analytics', 'trend', 'history', start, end, histLevel, histKind],
+    queryFn: () => get<Trend>('/analytics/category-trend', { start, end, level: histLevel, kind: histKind, top: 20 }),
+  })
+  const incStack = useQuery({
+    queryKey: ['analytics', 'trend', 'income', start, end, incLevel],
+    queryFn: () => get<Trend>('/analytics/category-trend', { start, end, level: incLevel, kind: 'income', top: 5, other: true }),
+  })
+  const expStack = useQuery({
+    queryKey: ['analytics', 'trend', 'expense', start, end, expLevel],
+    queryFn: () => get<Trend>('/analytics/category-trend', { start, end, level: expLevel, kind: 'expense', top: 7, other: true }),
   })
   const merchants = useQuery({
     queryKey: ['analytics', 'merchants', focus.start, focus.end],
     queryFn: () => get<Merchant[]>('/analytics/merchants', { ...focus, limit: 12 }),
   })
-  const anomalies = useAnomalies(anomalyStatus)
-  const job = useJob(jobId)
-  const run = useMutation({
-    mutationFn: () => post<Job>('/anomalies/run'),
-    onSuccess: (j) => setJobId(j.id),
-  })
-  const done = job.data?.status === 'succeeded' || job.data?.status === 'failed'
-  const checking = jobId !== null && !done
-  useEffect(() => {
-    if (done) qc.invalidateQueries({ queryKey: ['anomalies'] })
-  }, [done, qc])
   const [openGroup, setOpenGroup] = useState<string | null>(null)
 
   const totals = (flow.data ?? []).reduce((a, m) => ({ inc: a.inc + m.income, exp: a.exp + m.expenses }), { inc: 0, exp: 0 })
   const n = Math.max(1, flow.data?.length ?? 1)
+  const net = totals.inc - totals.exp
+  const byNet = [...(flow.data ?? [])].sort((a, b) => b.net - a.net)
+  const upMonths = byNet.filter((m) => m.net > 0).length
+  const monthName = (m: string) => parseIso(m).toLocaleString('en-US', { month: 'short', year: 'numeric' })
   const groups = new Map<string, { id: number | null; spent: number; cats: CategoryRow[] }>()
   for (const r of cats.data?.rows ?? []) {
     if (r.spent <= 0) continue
@@ -86,6 +87,23 @@ export function Reports() {
   const groupList = [...groups.entries()].sort((a, b) => b[1].spent - a[1].spent)
   const maxGroup = Math.max(1, ...groupList.map(([, g]) => g.spent))
   const exportUrl = `/api/transactions/export.csv?start=${focus.start}&end=${focus.end}`
+  const histSeries = (hist.data?.series ?? []).slice(0, histAll ? undefined : 10)
+  const sid = (s: { id: number | null }) => s.id ?? 0
+  const stackTip = (q: typeof incStack, kind: 'income' | 'expense', level: 'group' | 'category') =>
+    (i: number, si: number | null, ctx: { total: number; avg: number }): TipSpec | null => {
+      const d = q.data
+      if (!d) return null
+      const m = d.months[i]
+      const base = { start: m, end: monthEnd(m), kind, level }
+      if (si === null) {
+        return { title: `${monthName(m)} · ${kind === 'income' ? 'income' : 'expenses'}`,
+          lines: [`${money(ctx.total)} · 12-mo avg ${money(ctx.avg)}`], contrib: base }
+      }
+      const s = d.series[si]
+      const others = d.series.filter((x) => x.name !== 'Other').map(sid)
+      return { title: `${s.name} · ${monthName(m)}`, lines: [money(s.values[i])],
+        contrib: s.name === 'Other' ? { ...base, exclude: others } : { ...base, ids: [sid(s)] } }
+    }
 
   return (
     <section className="page">
@@ -119,15 +137,62 @@ export function Reports() {
           <a className="btn btn-secondary" href={exportUrl}>Export CSV</a>
         </div>
       </header>
-      <ErrorNote error={span.error || flow.error || cats.error || trend.error || merchants.error || run.error} />
+      <ErrorNote error={span.error || flow.error || cats.error || hist.error || merchants.error || incStack.error || expStack.error} />
+
+      {([
+        { key: 'inc', kind: 'income', kicker: 'Income', total: totals.inc, q: incStack, lvl: incLevel, setLvl: setIncLevel },
+        { key: 'exp', kind: 'expense', kicker: 'Expenses', total: totals.exp, q: expStack, lvl: expLevel, setLvl: setExpLevel },
+      ] as const).map((c) => (
+        <Card key={c.key}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div>
+              <div className="card-kicker">{c.kicker}</div>
+              <div className="card-title">{moneyRound(c.total)} · {moneyRound(c.total / n)}/mo by {c.lvl === 'group' ? 'group' : 'category'}</div>
+            </div>
+            <Seg name={`${c.key}-level`} value={c.lvl} onChange={c.setLvl}
+              options={[{ value: 'group', label: 'Groups' }, { value: 'category', label: 'Categories' }]} />
+          </div>
+          <StackedBars months={c.q.data?.months ?? []} series={c.q.data?.series ?? []} highlight={month}
+            onPick={(m) => setParams({ month: m })} tip={stackTip(c.q, c.kind, c.lvl)} />
+          <Legend items={[
+            ...(c.q.data?.series ?? []).map((s, i) => ({ label: `${s.name} ${moneyRound(s.total / n)}/mo`, color: stackColor(s.name, i) })),
+            { label: '12-mo avg', color: 'var(--color-text)', dashed: true },
+          ]} />
+          {c.key === 'exp' && <div className="card-meta">Hover a bar or segment for its top merchants; click a month to break it down below.</div>}
+        </Card>
+      ))}
 
       <Card>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <div><div className="card-kicker">Cash flow</div><div className="card-title">Income vs expenses by month</div></div>
-          <Legend items={[{ label: 'Income', color: 'var(--color-accent-300)' }, { label: 'Expenses', color: 'var(--color-accent-700)' }]} />
+          <div>
+            <div className="card-kicker">Net income</div>
+            <div className="card-title">{netMode === 'waterfall' ? 'Running total of monthly changes' : 'Monthly net with 12-month average'}</div>
+          </div>
+          <div className="row">
+            <Legend items={[
+              { label: 'Net increase', color: NET_UP }, { label: 'Net decrease', color: NET_DOWN },
+              ...(netMode === 'monthly' ? [{ label: '12-mo avg', color: 'var(--color-text)' }] : []),
+            ]} />
+            <Seg name="netmode" value={netMode} onChange={setNetMode} options={[
+              { value: 'waterfall', label: 'Waterfall' }, { value: 'monthly', label: 'Monthly' },
+            ]} />
+          </div>
         </div>
-        <CashflowChart data={flow.data ?? []} onPick={(m) => setParams({ month: m })} />
-        <div className="card-meta">Click a month to break it down below.</div>
+        <NetChart data={flow.data ?? []} mode={netMode} onPick={(m) => setParams({ month: m })}
+          tip={(m, ctx) => {
+            const f = flow.data?.find((x) => x.month === m)
+            return { title: `${monthName(m)} · net ${money(ctx.net, true)}`,
+              lines: [`Income ${money(f?.income ?? 0)} · expenses ${money(f?.expenses ?? 0)}`,
+                netMode === 'waterfall' ? `Running total ${money(ctx.running, true)}` : `12-mo avg ${money(ctx.avg ?? 0, true)}`],
+              contrib: { start: m, end: monthEnd(m) } }
+          }} />
+        {byNet.length > 0 && (
+          <div className="card-meta">
+            Net {moneyRound(net)} over {n} months · avg {moneyRound(net / n)}/mo · {upMonths} of {n} months positive
+            · best {monthName(byNet[0].month)} ({moneyRound(byNet[0].net)})
+            · worst {monthName(byNet[byNet.length - 1].month)} ({moneyRound(byNet[byNet.length - 1].net)})
+          </div>
+        )}
       </Card>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>
@@ -142,7 +207,9 @@ export function Reports() {
           {groupList.map(([name, g]) => (
             <div key={name} className="stack" style={{ gap: 2 }}>
               <div className="row" style={{ justifyContent: 'space-between', cursor: 'pointer', flexWrap: 'nowrap' }}
-                onClick={() => setOpenGroup(openGroup === name ? null : name)}>
+                onClick={() => setOpenGroup(openGroup === name ? null : name)}
+                {...tipHandlers(tip, () => ({ title: name, lines: [money(g.spent)],
+                  contrib: { ...focus, kind: 'expense', level: 'group', ids: [g.id ?? 0] } }))}>
                 <span style={{ fontSize: 13 }}>
                   {openGroup === name ? '▾' : '▸'} {g.id
                     ? <Link to={groupPath(g.id)} onClick={(e) => e.stopPropagation()}>{name}</Link>
@@ -154,7 +221,9 @@ export function Reports() {
               {openGroup === name && (
                 <div className="stack small" style={{ paddingLeft: 14, marginTop: 4 }}>
                   {g.cats.map((c) => (
-                    <div key={c.category} className="row" style={{ justifyContent: 'space-between' }}>
+                    <div key={c.category} className="row" style={{ justifyContent: 'space-between' }}
+                      {...tipHandlers(tip, () => ({ title: c.category, lines: [money(c.spent)],
+                        contrib: { ...focus, kind: 'expense', level: 'category', ids: [c.category_id ?? 0] } }))}>
                       <Link to={c.category_id ? categoryPath(c.category_id) : '/transactions'}>{c.category}</Link>
                       <span>{money(c.spent)} · {c.count}</span>
                     </div>
@@ -171,7 +240,8 @@ export function Reports() {
             <thead><tr><th>Merchant</th><th style={{ textAlign: 'right' }}>Count</th><th style={{ textAlign: 'right' }}>Spent</th></tr></thead>
             <tbody>
               {(merchants.data ?? []).map((m) => (
-                <tr key={m.merchant}>
+                <tr key={m.merchant} {...tipHandlers(tip, () => ({ title: m.example, lines: [`${money(m.spent)} · ${m.count} transactions`],
+                  contrib: { ...focus, merchant: m.merchant }, show: 'transactions' }))}>
                   <td><Link to={merchantPath(m.merchant)}>{m.example}</Link></td>
                   <td className="num">{m.count}</td><td className="num">{money(m.spent)}</td>
                 </tr>
@@ -183,28 +253,43 @@ export function Reports() {
 
       <Card>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <div><div className="card-kicker">Trend</div><div className="card-title">Top {level === 'group' ? 'groups' : 'categories'} by month</div></div>
-          <Seg name="level" value={level} onChange={setLevel} options={[{ value: 'group', label: 'Groups' }, { value: 'category', label: 'Categories' }]} />
-        </div>
-        <TrendChart months={trend.data?.months ?? []} series={trend.data?.series ?? []} />
-        <Legend items={(trend.data?.series ?? []).map((s, i) => ({ label: `${s.name} (${money(s.total / n)}/mo)`, color: seriesColor(i) }))} />
-      </Card>
-
-      <Card>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <div><div className="card-kicker">Out of norm</div><div className="card-title">Findings</div></div>
+          <div>
+            <div className="card-kicker">Monthly history</div>
+            <div className="card-title">{histKind === 'expense' ? 'Expenses' : 'Income'} by {histLevel === 'group' ? 'group' : 'category'}</div>
+          </div>
           <div className="row">
-            <Seg name="astatus" value={anomalyStatus} onChange={setAnomalyStatus} options={[
-              { value: 'open', label: 'Open' }, { value: 'reviewed', label: 'Reviewed' }, { value: 'dismissed', label: 'Dismissed' },
-            ]} />
-            <Button onClick={() => run.mutate()} disabled={run.isPending || checking}>
-              {checking ? 'Checking…' : 'Run check now'}
-            </Button>
+            <Seg name="hist-kind" value={histKind} onChange={setHistKind}
+              options={[{ value: 'expense', label: 'Expenses' }, { value: 'income', label: 'Income' }]} />
+            <Seg name="hist-level" value={histLevel} onChange={setHistLevel}
+              options={[{ value: 'group', label: 'Groups' }, { value: 'category', label: 'Categories' }]} />
           </div>
         </div>
-        <AnomalyList items={anomalies.data ?? []} />
-        <div className="card-meta">Checks run nightly and after each import: category spikes vs. 12-month norm, unusually large purchases for a
-          merchant, large one-off transactions, first purchases at new merchants, and bill increases.</div>
+        <SeriesHistory months={hist.data?.months ?? []} series={histSeries} highlight={month}
+          onPick={(m) => setParams({ month: m })}
+          label={(si, avg) => {
+            const s = histSeries[si]
+            const to = s.id ? (histLevel === 'group' ? groupPath(s.id) : categoryPath(s.id)) : null
+            return (
+              <>
+                {to ? <Link to={to}>{s.name}</Link> : <span>{s.name}</span>}
+                <span className="small text-muted">avg {moneyRound(avg)}/mo</span>
+              </>
+            )
+          }}
+          tip={(i, si, avg) => {
+            const s = histSeries[si]
+            const m = hist.data?.months[i] ?? ''
+            return { title: `${s.name} · ${monthName(m)}`, lines: [`${money(s.values[i])} · avg ${money(avg)}/mo`],
+              contrib: { start: m, end: monthEnd(m), kind: histKind, level: histLevel, ids: [sid(s)] } }
+          }} />
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <div className="card-meta">Each row has its own scale; the dashed line is the average for the range. Hover a bar for its top merchants.</div>
+          {(hist.data?.series.length ?? 0) > 10 && (
+            <Button variant="ghost" onClick={() => setHistAll(!histAll)}>
+              {histAll ? 'Show top 10' : `Show all ${hist.data?.series.length}`}
+            </Button>
+          )}
+        </div>
       </Card>
     </section>
   )

@@ -103,7 +103,7 @@ async def _anomaly_candidates(session: AsyncSession, kinds: tuple[str, ...], rul
             "subject_key": f"anomaly:{a.id}",
             "title": f"{label} · {a.title} {money(a.amount)}",
             "body": a.detail + (f"\n{a.ai_note}" if a.ai_note else ""),
-            "link": f"/transactions/{a.transaction_id}" if a.transaction_id else "/reports",
+            "link": f"/transactions/{a.transaction_id}" if a.transaction_id else "/findings",
         }
         for a in rows
     ]

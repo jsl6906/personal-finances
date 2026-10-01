@@ -96,6 +96,34 @@ async def test_reports(client, data):
     ).json()
     assert trend["series"][0]["name"] == "TA Dining" and trend["series"][0]["values"][-1] == 400.0
 
+    june_only = {"start": "2024-06-01", "end": "2024-06-30", "level": "category"}
+    spend = (await client.get("/api/analytics/category-trend", params={**june_only, "top": 1, "other": True})).json()
+    assert sum(s["values"][0] for s in spend["series"]) == pytest.approx(june["expenses"])
+    assert spend["series"][-1]["name"] == "Other"
+    income = (await client.get("/api/analytics/category-trend", params={**june_only, "kind": "income"})).json()
+    assert {s["name"]: s["values"][0] for s in income["series"]}["TA Pay"] == 3000.0
+
+    june_range = {"start": "2024-06-01", "end": "2024-06-30"}
+    dining = data["dining"]["id"]
+    contrib = (
+        await client.get(
+            "/api/analytics/contributors", params={**june_range, "kind": "expense", "ids": [dining], "limit": 1}
+        )
+    ).json()
+    assert contrib["count"] == 2 and contrib["out"] == 400.0
+    assert contrib["merchants"][0]["name"] == "TA STEAKHOUSE" and len(contrib["merchants"]) == 1
+    assert contrib["transactions"][0]["amount"] == -220.0
+    everything = (
+        await client.get("/api/analytics/contributors", params={**june_range, "kind": "expense", "basis": "all"})
+    ).json()
+    rest = (
+        await client.get(
+            "/api/analytics/contributors", params={**june_range, "kind": "expense", "exclude": [dining], "basis": "all"}
+        )
+    ).json()
+    assert rest["count"] == everything["count"] - 2
+    assert rest["out"] == pytest.approx(everything["out"] - 400.0)
+
     merch = (await client.get("/api/analytics/merchants", params={"start": "2024-06-01", "end": "2024-06-30"})).json()
     assert merch[0]["merchant"] == "ta new place" or merch[0]["spent"] >= 250
 

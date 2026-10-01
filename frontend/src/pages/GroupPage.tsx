@@ -6,7 +6,7 @@ import { Legend, MonthlyBars, TrendChart } from '../components/Charts'
 import { Breakdown, Findings, Kpis, RangeSeg, TxnList, YearTable } from '../components/Detail'
 import { Card, ErrorNote } from '../components/ui'
 import { breakdownPath, measure, rangeLabel, summarize, useDetailRange } from '../detail'
-import { fullDate, money } from '../format'
+import { fullDate, money, monthEnd, monthLabel, parseIso } from '../format'
 import { categoryPath, merchantPath } from '../links'
 import { RelatedSetup } from './CategoryPage'
 
@@ -60,8 +60,10 @@ function GroupView({ id }: { id: number }) {
       <Card>
         <div className="card-kicker">By month</div>
         <div className="card-title">{money(sum.total)} {g.type === 'income' ? 'received' : 'spent'}</div>
-        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} budget={budget} highlight={r.month} onPick={r.pick} />
-        <div className="card-meta">Net of refunds. Click a month to filter the transactions below.</div>
+        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} budget={budget} highlight={r.month} onPick={r.pick}
+          tip={(m, v) => ({ title: `${g.name} · ${monthLabel(parseIso(m))}`, lines: [money(v)],
+            contrib: { start: m, end: monthEnd(m), basis: 'all', level: 'group', ids: [id] } })} />
+        <div className="card-meta">Net of refunds. Hover a month for its top merchants; click to filter the transactions below.</div>
       </Card>
 
       <div className="grid-main-side">

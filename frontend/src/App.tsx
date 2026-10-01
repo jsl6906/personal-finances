@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { get, setUnauthorizedHandler } from './api'
 import { Layout } from './components/Layout'
+import { TipProvider } from './components/Tip'
 import { AccountPage } from './pages/AccountPage'
 import { Alerts } from './pages/Alerts'
 import { Bills } from './pages/Bills'
@@ -9,6 +10,7 @@ import { Budgets } from './pages/Budgets'
 import { CategoryPage } from './pages/CategoryPage'
 import { Dashboard } from './pages/Dashboard'
 import { Duplicates } from './pages/Duplicates'
+import { Findings } from './pages/Findings'
 import { GroupPage } from './pages/GroupPage'
 import { ImportHome } from './pages/Import'
 import { ImportWizard } from './pages/ImportWizard'
@@ -38,10 +40,12 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <TipProvider>
       <Routes>
         <Route element={<Layout onLogout={() => setAuthed(false)} />}>
           <Route index element={<Dashboard />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="findings" element={<Findings />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="transactions/:id" element={<TransactionPage />} />
           <Route path="merchants" element={<MerchantPage />} />
@@ -60,6 +64,7 @@ export default function App() {
           <Route path="*" element={<Placeholder title="Not found" phase={0} description="" />} />
         </Route>
       </Routes>
+      </TipProvider>
     </BrowserRouter>
   )
 }

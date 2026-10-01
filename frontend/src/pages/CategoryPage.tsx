@@ -5,7 +5,7 @@ import { MonthlyBars } from '../components/Charts'
 import { Breakdown, Findings, Kpis, RangeSeg, TxnList, YearTable } from '../components/Detail'
 import { Card, ErrorNote } from '../components/ui'
 import { breakdownPath, measure, rangeLabel, summarize, useDetailRange } from '../detail'
-import { fullDate, money } from '../format'
+import { fullDate, money, monthEnd, monthLabel, parseIso } from '../format'
 import { groupPath, merchantPath } from '../links'
 
 export function CategoryPage() {
@@ -56,8 +56,10 @@ function CategoryView({ id }: { id: number }) {
       <Card>
         <div className="card-kicker">By month</div>
         <div className="card-title">{money(sum.total)} {verb}</div>
-        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} budget={d.budget?.monthly} highlight={r.month} onPick={r.pick} />
-        <div className="card-meta">Net of refunds. Click a month to filter the transactions below.</div>
+        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} budget={d.budget?.monthly} highlight={r.month} onPick={r.pick}
+          tip={(m, v) => ({ title: `${c.name} · ${monthLabel(parseIso(m))}`, lines: [money(v)],
+            contrib: { start: m, end: monthEnd(m), basis: 'all', level: 'category', ids: [id] } })} />
+        <div className="card-meta">Net of refunds. Hover a month for its top merchants; click to filter the transactions below.</div>
       </Card>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>

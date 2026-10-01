@@ -16,7 +16,7 @@ export const useBalanceTrend = () =>
   useQuery({ queryKey: ['balances', 'trend'], queryFn: () => get<BalanceTrend>('/balances/trend', { days: 730 }), staleTime: STALE })
 
 export function useAnomalies(status = 'open') {
-  return useQuery({ queryKey: ['anomalies', status], queryFn: () => get<Anomaly[]>('/anomalies', { status }) })
+  return useQuery({ queryKey: ['anomalies', status], queryFn: () => get<Anomaly[]>('/anomalies', { status, limit: 500 }) })
 }
 
 export function useJob(id: number | null) {

@@ -58,9 +58,42 @@ async def category_trend(
     level: Literal["group", "category"] = "group",
     top: int = Query(6, ge=1, le=20),
     ids: list[int] | None = Query(None),
+    kind: Literal["expense", "income"] = "expense",
+    other: bool = False,
     session: AsyncSession = Depends(get_session),
 ):
-    return await reports.category_trend(session, *_range(start, end, months), level, top, ids)
+    return await reports.category_trend(session, *_range(start, end, months), level, top, ids, kind, other)
+
+
+@router.get("/analytics/contributors")
+async def contributors(
+    start: date,
+    end: date,
+    basis: Literal["reports", "all"] = "reports",
+    kind: Literal["expense", "income"] | None = None,
+    level: Literal["group", "category"] = "category",
+    ids: list[int] | None = Query(None),
+    exclude: list[int] | None = Query(None),
+    account_id: int | None = None,
+    merchant: str | None = None,
+    limit: int = Query(8, ge=1, le=25),
+    session: AsyncSession = Depends(get_session),
+):
+    if start > end:
+        raise HTTPException(422, "start must be before end")
+    return await reports.contributors(
+        session,
+        start,
+        end,
+        basis=basis,
+        kind=kind,
+        level=level,
+        ids=ids,
+        exclude=exclude,
+        account_id=account_id,
+        merchant=merchant,
+        limit=limit,
+    )
 
 
 @router.get("/analytics/merchants")

@@ -40,6 +40,12 @@ export function monthLabel(d: Date): string {
   return `${LONG_MONTHS[d.getMonth()]} ${d.getFullYear()}`
 }
 
+/** Last day (ISO) of the month containing the ISO date `m`. */
+export function monthEnd(m: string): string {
+  const d = parseIso(m.slice(0, 10))
+  return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0))
+}
+
 export function monthName(d: Date): string {
   return LONG_MONTHS[d.getMonth()]
 }

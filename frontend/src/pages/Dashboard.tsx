@@ -6,7 +6,7 @@ import { AnomalyList } from '../components/AnomalyList'
 import { CashflowChart, Legend } from '../components/Charts'
 import { BalanceSparkline } from '../components/LineChart'
 import { Button, Card } from '../components/ui'
-import { fullDate, iso, money, moneyRound, monthLabel, shortDate } from '../format'
+import { fullDate, iso, money, moneyRound, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { useAccounts, useAnomalies, useBalanceTrend } from '../hooks'
 import { accountPath, categoryPath, groupPath, txnPath } from '../links'
 
@@ -86,20 +86,32 @@ export function Dashboard() {
             <div><div className="card-kicker">Trend</div><div className="card-title">Income vs expenses · trailing 12 months</div></div>
             <Legend items={[{ label: 'Income', color: 'var(--color-accent-300)' }, { label: 'Expenses', color: 'var(--color-accent-700)' }]} />
           </div>
-          <CashflowChart data={flow.data ?? []} onPick={(m) => navigate(`/reports?month=${m}`)} />
+          <CashflowChart data={flow.data ?? []} onPick={(m) => navigate(`/reports?month=${m}`)}
+            tip={(m, part) => {
+              const f = flow.data?.find((x) => x.month === m)
+              const label = monthLabel(parseIso(m))
+              if (part) {
+                return { title: `${part === 'income' ? 'Income' : 'Expenses'} · ${label}`, lines: [money(part === 'income' ? f?.income : f?.expenses)],
+                  contrib: { start: m, end: monthEnd(m), kind: part === 'income' ? 'income' : 'expense' } }
+              }
+              return { title: label, lines: [`Income ${money(f?.income)} · expenses ${money(f?.expenses)} · net ${money(f?.net, true)}`],
+                contrib: { start: m, end: monthEnd(m) } }
+            }} />
         </Card>
         <Card>
           <div className="card-kicker">Out of norm</div>
-          <div className="card-title">
+          <Link to="/findings" className="card-title">
             {anomalies.data ? `${anomalies.data.length} item${anomalies.data.length === 1 ? '' : 's'} flagged` : '…'}
-          </div>
+          </Link>
           <AnomalyList items={anomalies.data ?? []} limit={4} />
           {lastSent && (
             <Link to="/alerts" className="card-meta">
               Email alert sent to {lastSent.recipients.length} recipient{lastSent.recipients.length === 1 ? '' : 's'} · {shortDate(lastSent.sent_at)}
             </Link>
           )}
-          <Link to="/reports" className="card-meta">All findings & reports</Link>
+          <Link to="/findings" className="card-meta">
+            {anomalies.data && anomalies.data.length > 4 ? `Review all ${anomalies.data.length} findings` : 'Review findings'}
+          </Link>
         </Card>
       </div>
 

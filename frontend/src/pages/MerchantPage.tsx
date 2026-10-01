@@ -7,7 +7,7 @@ import { Breakdown, Findings, Kpis, RangeSeg, TxnList, YearTable } from '../comp
 import { MerchantPicker } from '../components/MerchantInput'
 import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, rangeLabel, useDetailRange } from '../detail'
-import { fullDate, money, shortDate } from '../format'
+import { fullDate, money, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { categoryPath, merchantPath, txnPath } from '../links'
 
 export function MerchantPage() {
@@ -115,8 +115,10 @@ function MerchantView({ merchant: key }: { merchant: string }) {
             <div className="card-title">{money(rangeTotal)} {income ? 'received' : 'spent'}</div>
           </div>
         </div>
-        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} highlight={r.month} onPick={r.pick} />
-        <div className="card-meta">Click a month to filter the transactions below.</div>
+        <MonthlyBars data={d.monthly.map((m) => ({ month: m.month, value: value(m) }))} highlight={r.month} onPick={r.pick}
+          tip={(m, v) => ({ title: `${d.name} · ${monthLabel(parseIso(m))}`, lines: [money(v)],
+            contrib: { start: m, end: monthEnd(m), basis: 'all', merchant: d.key }, show: 'transactions' })} />
+        <div className="card-meta">Hover a month for its transactions; click to filter the list below.</div>
       </Card>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>

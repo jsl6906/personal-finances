@@ -6,7 +6,7 @@ import { LineChart } from '../components/LineChart'
 import { Breakdown, Findings, Kpis, RangeSeg, TableCard, TxnList, YearTable } from '../components/Detail'
 import { Card, ErrorNote } from '../components/ui'
 import { breakdownPath, rangeLabel, useDetailRange } from '../detail'
-import { fullDate, money, shortDate } from '../format'
+import { fullDate, money, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { merchantPath } from '../links'
 
 export function AccountPage() {
@@ -67,8 +67,14 @@ function AccountView({ id }: { id: number }) {
           <div><div className="card-kicker">Cash flow</div><div className="card-title">In vs out by month</div></div>
           <Legend items={[{ label: 'In', color: 'var(--color-accent-300)' }, { label: 'Out', color: 'var(--color-accent-700)' }]} />
         </div>
-        <CashflowChart data={d.monthly.map((m) => ({ month: m.month, income: m.received, expenses: m.spent, net: m.net }))} onPick={r.pick} />
-        <div className="card-meta">Includes transfers. Click a month to filter the transactions below.</div>
+        <CashflowChart data={d.monthly.map((m) => ({ month: m.month, income: m.received, expenses: m.spent, net: m.net }))} onPick={r.pick}
+          tip={(m) => {
+            const x = d.monthly.find((y) => y.month === m)
+            return { title: `${a.name} · ${monthLabel(parseIso(m))}`,
+              lines: [`In ${money(x?.received ?? 0)} · out ${money(x?.spent ?? 0)} · net ${money(x?.net ?? 0, true)}`],
+              contrib: { start: m, end: monthEnd(m), basis: 'all', account_id: id } }
+          }} />
+        <div className="card-meta">Includes transfers. Hover a month for its top merchants; click to filter the transactions below.</div>
       </Card>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>

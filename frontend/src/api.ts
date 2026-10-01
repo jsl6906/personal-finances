@@ -276,6 +276,16 @@ export interface CategoryRow {
   category_id: number | null; category: string; group_id: number | null; group: string; spent: number; income: number; count: number
 }
 export interface Trend { months: string[]; series: { id: number | null; name: string; total: number; values: number[] }[] }
+/** Filter for /analytics/contributors; in ids/exclude, 0 means Uncategorized. */
+export type ContribParams = {
+  start: string; end: string; basis?: 'reports' | 'all'; kind?: 'expense' | 'income'; level?: 'group' | 'category'
+  ids?: number[]; exclude?: number[]; account_id?: number; merchant?: string
+}
+export interface Contributors {
+  count: number; out: number; in: number
+  merchants: { key: string; name: string; count: number; out: number; in: number }[]
+  transactions: { id: number; date: string; description: string; amount: number; category: string | null }[]
+}
 export interface Merchant { merchant: string; example: string; spent: number; count: number; last_date: string }
 export interface Anomaly {
   id: number; kind: string; period: string; title: string; detail: string; ai_note: string | null; amount: number

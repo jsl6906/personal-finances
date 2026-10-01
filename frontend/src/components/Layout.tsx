@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { post } from '../api'
-import { useMembers } from '../hooks'
+import { useAnomalies, useMembers } from '../hooks'
 import { Icon } from './ui'
 
 const NAV = [
   { to: '/', icon: 'dashboard', label: 'Dashboard' },
   { to: '/reports', icon: 'reports', label: 'Reports' },
+  { to: '/findings', icon: 'findings', label: 'Findings' },
   { to: '/transactions', icon: 'transactions', label: 'Transactions' },
   { to: '/import', icon: 'import', label: 'Import' },
   { to: '/bills', icon: 'bills', label: 'Bills & statements' },
@@ -19,6 +20,7 @@ const NAV = [
 
 export function Layout({ onLogout }: { onLogout: () => void }) {
   const members = useMembers()
+  const openFindings = useAnomalies('open').data?.length
   const qc = useQueryClient()
   const { pathname } = useLocation()
   const [navOpen, setNavOpen] = useState(false)
@@ -47,6 +49,7 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
             <NavLink key={n.to} to={n.to} end={n.to === '/'} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
               <Icon name={n.icon} />
               <span className="label">{n.label}</span>
+              {n.to === '/findings' && openFindings ? <span className="badge">{openFindings}</span> : null}
             </NavLink>
           ))}
         </nav>
