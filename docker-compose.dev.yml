@@ -1,0 +1,15 @@
+# Local Postgres for development and tests (the deployed app uses Azure Postgres).
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: personal_storage
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ledger-dev-db:/var/lib/postgresql/data
+
+volumes:
+  ledger-dev-db:

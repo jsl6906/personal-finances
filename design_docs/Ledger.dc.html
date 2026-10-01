@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/industry-cc35ff53-b838-4da1-8b6d-010766a4a8fb/styles.css">
+  <script src="_ds/industry-cc35ff53-b838-4da1-8b6d-010766a4a8fb/_ds_bundle.js"></script>
+  <style>
+    html, body { margin:0; min-height:100vh; }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-900); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  </style>
+</helmet>
+<div style="display:grid; grid-template-columns:212px minmax(0,1fr); min-height:100vh; font-family:var(--font-body); color:var(--color-text); background:var(--color-bg)">
+
+  <!-- Sidebar -->
+  <aside style="border-right:1px solid var(--color-divider); padding:var(--space-4) var(--space-3); display:flex; flex-direction:column; gap:var(--space-6); position:sticky; top:0; height:100vh">
+    <div style="display:flex; align-items:baseline; gap:8px; padding:0 var(--space-2)">
+      <span style="font-family:var(--font-heading); font-weight:600; font-size:22px; letter-spacing:-0.01em">Ledger</span>
+      <span style="font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--color-accent-700)">Household</span>
+    </div>
+    <nav style="display:flex; flex-direction:column; gap:2px">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="8">
+        <button onClick="{{ n.go }}" style="display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:8px var(--space-2); border:1px solid {{ n.border }}; background:{{ n.bg }}; color:{{ n.color }}; font:inherit; font-size:14px; cursor:pointer; border-radius:0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="{{ n.icon }}"></path></svg>
+          <span style="flex:1">{{ n.label }}</span>
+          <span style="font-size:11px; color:var(--color-accent-700)">{{ n.badge }}</span>
+        </button>
+      </sc-for>
+    </nav>
+    <div style="margin-top:auto; display:flex; flex-direction:column; gap:var(--space-2); padding:0 var(--space-2); font-size:12px; color:var(--color-neutral-700)">
+      <div style="display:flex; align-items:center; gap:8px"><span style="width:8px; height:8px; background:var(--color-accent); display:inline-block"></span>Tiller sync · 6:02 am</div>
+      <div style="display:flex; align-items:center; gap:8px"><span style="width:8px; height:8px; border:1px solid var(--color-accent); display:inline-block; animation:pulse 1.6s infinite"></span>Backfill · 1,240 / 2,014 files</div>
+      <div style="display:flex; gap:6px; margin-top:var(--space-2)">
+        <span style="width:24px; height:24px; border:1px solid var(--color-divider); display:grid; place-items:center; font-size:10px; font-family:var(--font-heading)">JL</span>
+        <sc-if value="{{ household }}" hint-placeholder-val="{{ true }}"><span style="width:24px; height:24px; border:1px solid var(--color-divider); display:grid; place-items:center; font-size:10px; font-family:var(--font-heading)">KL</span></sc-if>
+        <span style="align-self:center; margin-left:4px">Signed in via Entra ID</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main style="padding:var(--space-6) var(--space-8) var(--space-8); display:flex; flex-direction:column; gap:var(--space-6); min-width:0">
+
+    <!-- ===== DASHBOARD ===== -->
+    <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <section data-screen-label="Dashboard" style="display:flex; flex-direction:column; gap:var(--space-6)">
+        <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap">
+          <div><h2 style="margin:0">September 2026</h2><div class="text-muted" style="font-size:13px">Household overview · 13 accounts · last transaction 26 Sep</div></div>
+          <div style="display:flex; gap:var(--space-2)">
+            <button class="btn btn-secondary" onClick="{{ goImport }}">Import transactions</button>
+            <button class="btn btn-primary blueprint" onClick="{{ goChat }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Ask the ledger</button>
+          </div>
+        </header>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:var(--space-4)">
+          <sc-for list="{{ stats }}" as="s" hint-placeholder-count="4">
+            <div class="card blueprint" style="gap:4px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">{{ s.k }}</div>
+              <div style="font-family:var(--font-heading); font-weight:600; font-size:30px; line-height:1">{{ s.v }}</div>
+              <div class="card-meta">{{ s.m }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:var(--space-4)">
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex; justify-content:space-between; align-items:baseline">
+              <div><div class="card-kicker">Trend</div><div class="card-title">Income vs expenses · trailing 12 months</div></div>
+              <div style="display:flex; gap:var(--space-3); font-size:11px; color:var(--color-neutral-700)">
+                <span style="display:flex; align-items:center; gap:5px"><span style="width:10px; height:10px; background:var(--color-accent-300); display:inline-block"></span>Income</span>
+                <span style="display:flex; align-items:center; gap:5px"><span style="width:10px; height:10px; background:var(--color-accent-700); display:inline-block"></span>Expenses</span>
+              </div>
+            </div>
+            <svg viewBox="0 0 640 220" width="100%" style="display:block; margin-top:var(--space-2)">
+              <line x1="0" y1="200" x2="640" y2="200" stroke="var(--color-divider)"></line>
+              <line x1="0" y1="100" x2="640" y2="100" stroke="var(--color-divider)" stroke-dasharray="2 4"></line>
+              <text x="0" y="96" font-size="10" fill="var(--color-neutral-600)" font-family="Barlow">$4,000</text>
+              <sc-for list="{{ months }}" as="m" hint-placeholder-count="12">
+                <rect x="{{ m.x }}" y="{{ m.yInc }}" width="16" height="{{ m.hInc }}" fill="var(--color-accent-300)"></rect>
+                <rect x="{{ m.x2 }}" y="{{ m.yExp }}" width="16" height="{{ m.hExp }}" fill="var(--color-accent-700)"></rect>
+                <text x="{{ m.tx }}" y="216" font-size="10" text-anchor="middle" fill="var(--color-neutral-600)" font-family="Barlow">{{ m.label }}</text>
+              </sc-for>
+            </svg>
+          </div>
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Out of norm</div>
+            <div class="card-title">3 items flagged this month</div>
+            <div style="display:flex; flex-direction:column; gap:var(--space-3); margin-top:var(--space-2)">
+              <sc-for list="{{ anomalies }}" as="a" hint-placeholder-count="3">
+                <div style="display:grid; grid-template-columns:1fr auto; gap:2px 12px; padding-bottom:var(--space-3); border-bottom:1px solid var(--color-divider)">
+                  <div style="font-size:14px; font-weight:500">{{ a.t }}</div>
+                  <div style="font-family:var(--font-heading); font-weight:600; font-size:16px; text-align:right">{{ a.v }}</div>
+                  <div style="font-size:12px; color:var(--color-neutral-700); grid-column:1 / -1">{{ a.d }}</div>
+                  <div style="grid-column:1 / -1; display:flex; gap:6px; margin-top:4px"><span class="tag tag-accent">{{ a.tag }}</span><button class="btn btn-ghost" style="font-size:12px; padding:2px 6px" onClick="{{ goTransactions }}">Review</button></div>
+                </div>
+              </sc-for>
+            </div>
+            <div class="card-meta">Email alert sent to 2 recipients · 27 Sep</div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-4)">
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Accounts</div><div class="card-title">Balances</div>
+            <table class="table" style="margin-top:var(--space-2)">
+              <thead><tr><th>Account</th><th>Institution</th><th style="text-align:right">Balance</th></tr></thead>
+              <tbody>
+                <sc-for list="{{ accounts }}" as="ac" hint-placeholder-count="8">
+                  <tr><td>{{ ac.n }}</td><td class="text-muted">{{ ac.i }}</td><td style="text-align:right; font-variant-numeric:tabular-nums">{{ ac.b }}</td></tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex; justify-content:space-between; align-items:baseline"><div><div class="card-kicker">Budget</div><div class="card-title">September · 22 days in</div></div><button class="btn btn-ghost" onClick="{{ goBudgets }}">All budgets</button></div>
+            <div style="display:flex; flex-direction:column; gap:var(--space-3); margin-top:var(--space-2)">
+              <sc-for list="{{ budgets }}" as="b" hint-placeholder-count="6">
+                <div style="display:grid; grid-template-columns:120px 1fr auto; gap:12px; align-items:center; font-size:13px">
+                  <div>{{ b.c }}</div>
+                  <div style="height:8px; border:1px solid var(--color-divider); position:relative"><div style="position:absolute; inset:0; width:{{ b.pct }}%; background:{{ b.fill }}"></div></div>
+                  <div style="font-variant-numeric:tabular-nums; color:{{ b.color }}">{{ b.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== TRANSACTIONS ===== -->
+    <sc-if value="{{ isTransactions }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Transactions" style="display:flex; flex-direction:column; gap:var(--space-4)">
+        <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap">
+          <div><h2 style="margin:0">Transactions</h2><div class="text-muted" style="font-size:13px">1,214 in 2026 · 12 shown · 2 flagged</div></div>
+          <div style="display:flex; gap:var(--space-2); align-items:center">
+            <input class="input" placeholder="Search description, notes, amount…" style="width:260px">
+            <button class="btn btn-secondary" onClick="{{ runDupScan }}">Scan for duplicates</button>
+            <button class="btn btn-primary blueprint" onClick="{{ goImport }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Import</button>
+          </div>
+        </header>
+        <div style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap">
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="txf" checked="{{ txAll }}" onChange="{{ setTxAll }}">All</label>
+            <label class="seg-opt"><input type="radio" name="txf" checked="{{ txFlag }}" onChange="{{ setTxFlag }}">Flagged</label>
+            <label class="seg-opt"><input type="radio" name="txf" checked="{{ txBills }}" onChange="{{ setTxBills }}">With statements</label>
+          </div>
+          <span class="tag tag-outline">Sep 2026</span><span class="tag tag-neutral">All accounts</span><span class="tag tag-neutral">All categories</span>
+          <sc-if value="{{ scanDone }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent">Duplicate scan: 0 new candidates · 14 confirmed-separate pairs kept</span></sc-if>
+        </div>
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) {{ detailCol }}; gap:var(--space-4); align-items:start">
+          <div class="card blueprint" style="padding:0; min-width:0; overflow-x:auto"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <table class="table">
+              <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Account</th><th></th><th style="text-align:right">Amount</th></tr></thead>
+              <tbody>
+                <sc-for list="{{ txRows }}" as="t" hint-placeholder-count="12">
+                  <tr onClick="{{ t.select }}" style="cursor:pointer; background:{{ t.rowBg }}">
+                    <td style="white-space:nowrap; color:var(--color-neutral-700)">{{ t.date }}</td>
+                    <td style="font-weight:500">{{ t.desc }}</td>
+                    <td><span class="tag tag-neutral">{{ t.cat }}</span></td>
+                    <td class="text-muted" style="white-space:nowrap">{{ t.acct }}</td>
+                    <td style="white-space:nowrap; font-size:11px; color:var(--color-accent-700)">{{ t.marks }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; color:{{ t.amtColor }}">{{ t.amt }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+            <aside class="card blueprint" style="gap:var(--space-3); position:sticky; top:var(--space-6)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start">
+                <div><div class="card-kicker">Transaction</div><div class="card-title">{{ sel.desc }}</div><div class="text-muted" style="font-size:12px">{{ sel.date }} · added {{ sel.added }}</div></div>
+                <button class="btn btn-ghost btn-icon" onClick="{{ clearSel }}">×</button>
+              </div>
+              <div style="font-family:var(--font-heading); font-weight:600; font-size:32px; line-height:1">{{ sel.amt }}</div>
+              <div style="display:grid; gap:var(--space-2)">
+                <div class="field"><label>Category</label><input class="input" value="{{ sel.cat }}" readOnly></div>
+                <div class="field"><label>Account</label><input class="input" value="{{ sel.acct }}" readOnly></div>
+                <div class="field"><label>Notes</label><textarea class="input" style="min-height:56px" defaultValue="{{ sel.notes }}"></textarea></div>
+              </div>
+              <div style="border-top:1px solid var(--color-divider); padding-top:var(--space-3); display:flex; flex-direction:column; gap:var(--space-2)">
+                <div class="card-kicker">Budget treatment</div>
+                <label class="radio"><input type="radio" name="spr" checked="{{ sel.notSpread }}" readOnly><span class="dot"></span>Count in {{ sel.month }}</label>
+                <label class="radio"><input type="radio" name="spr" checked="{{ sel.spread }}" readOnly><span class="dot"></span>Spread over 12 months ({{ sel.perMonth }}/mo)</label>
+              </div>
+              <div style="border-top:1px solid var(--color-divider); padding-top:var(--space-3); display:flex; flex-direction:column; gap:var(--space-2)">
+                <div class="card-kicker">Statement</div>
+                <sc-if value="{{ sel.hasAtt }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:10px; border:1px solid var(--color-divider); padding:8px">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6"></path></svg>
+                    <div style="flex:1; min-width:0"><div style="font-size:13px; font-weight:500">{{ sel.attName }}</div><div style="font-size:11px; color:var(--color-neutral-700)">{{ sel.attMeta }}</div></div>
+                    <button class="btn btn-ghost" style="font-size:12px" onClick="{{ goBills }}">Open</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ sel.noAtt }}" hint-placeholder-val="{{ false }}">
+                  <button class="btn btn-secondary btn-block" style="margin:0">Attach statement (PDF, image)</button>
+                </sc-if>
+              </div>
+              <div style="border-top:1px solid var(--color-divider); padding-top:var(--space-3); display:flex; flex-direction:column; gap:6px">
+                <div class="card-kicker">Duplicate check</div>
+                <div style="font-size:12px; color:var(--color-neutral-700)">{{ sel.dupNote }}</div>
+              </div>
+            </aside>
+          </sc-if>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== IMPORT ===== -->
+    <sc-if value="{{ isImport }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Import" style="display:flex; flex-direction:column; gap:var(--space-6)">
+        <header><h2 style="margin:0">Import transactions</h2><div class="text-muted" style="font-size:13px">Spreadsheet or document → mapped rows → defaults → duplicate review → commit</div></header>
+        <ol style="display:grid; grid-template-columns:repeat(5,1fr); gap:var(--space-2); list-style:none; padding:0; margin:0">
+          <sc-for list="{{ steps }}" as="st" hint-placeholder-count="5">
+            <li onClick="{{ st.go }}" style="cursor:pointer; border-top:2px solid {{ st.line }}; padding-top:8px; display:flex; gap:8px; align-items:baseline; color:{{ st.color }}">
+              <span style="font-family:var(--font-heading); font-weight:600; font-size:18px">{{ st.n }}</span><span style="font-size:13px">{{ st.label }}</span>
+            </li>
+          </sc-for>
+        </ol>
+
+        <!-- Step 1: source -->
+        <sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:var(--space-4)">
+            <div class="card blueprint" style="min-height:220px; align-items:center; justify-content:center; text-align:center; gap:var(--space-2); border-style:dashed"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+              <div class="card-title">Spreadsheet</div>
+              <p class="card-body" style="max-width:34ch">.xlsx, .csv, or a Tiller sheet tab. You'll map columns to fields next.</p>
+              <button class="btn btn-secondary" onClick="{{ pickSheet }}">Choose file</button>
+            </div>
+            <div class="card blueprint" style="min-height:220px; align-items:center; justify-content:center; text-align:center; gap:var(--space-2); border-style:dashed"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8"></path></svg>
+              <div class="card-title">Document</div>
+              <p class="card-body" style="max-width:34ch">Bank or card statement PDF / scan. Gemini extracts the transaction table and proposes defaults.</p>
+              <button class="btn btn-secondary" onClick="{{ pickDoc }}">Choose file</button>
+            </div>
+          </div>
+          <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Recent imports</div>
+            <table class="table">
+              <thead><tr><th>File</th><th>Type</th><th>Rows</th><th>Duplicates removed</th><th>When</th></tr></thead>
+              <tbody>
+                <tr><td>Tiller_Transactions_Sep.csv</td><td class="text-muted">Spreadsheet</td><td>318</td><td>42</td><td class="text-muted">Today 6:02 am</td></tr>
+                <tr><td>Chase_Sapphire_2026-08.pdf</td><td class="text-muted">Document</td><td>61</td><td>58</td><td class="text-muted">3 Sep</td></tr>
+                <tr><td>USAA_Checking_2016-03.pdf</td><td class="text-muted">Document · backfill</td><td>47</td><td>0</td><td class="text-muted">2 Sep</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </sc-if>
+
+        <!-- Step 2: map -->
+        <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid; grid-template-columns:minmax(0,3fr) minmax(260px,2fr); gap:var(--space-4); align-items:start">
+            <div class="card blueprint" style="gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div style="display:flex; justify-content:space-between; align-items:baseline"><div><div class="card-kicker">{{ srcLabel }}</div><div class="card-title">{{ srcFile }}</div></div><span class="tag tag-accent">{{ srcRows }} rows detected</span></div>
+              <table class="table">
+                <thead><tr><th>Source column</th><th>Sample</th><th>Maps to</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ mapping }}" as="mp" hint-placeholder-count="6">
+                    <tr><td style="font-weight:500">{{ mp.src }}</td><td class="text-muted" style="font-variant-numeric:tabular-nums">{{ mp.sample }}</td><td><select class="input" style="min-height:32px; padding:4px 8px" defaultValue="{{ mp.to }}"><option>Transaction date</option><option>Posted date</option><option>Description</option><option>Amount</option><option>Category</option><option>Account</option><option>Notes</option><option>Check number</option><option>— ignore —</option></select></td></tr>
+                  </sc-for>
+                </tbody>
+              </table>
+              <div class="card-meta">Mapping saved as preset “{{ srcPreset }}” · reused automatically next time</div>
+            </div>
+            <div class="card blueprint" style="gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">Preview</div><div class="card-title">First 4 rows as they'll land</div>
+              <table class="table" style="font-size:13px">
+                <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+                <tbody>
+                  <tr><td>26 Sep</td><td>KROGER #412 SPRINGFIELD</td><td style="text-align:right">−142.18</td></tr>
+                  <tr><td>24 Sep</td><td>COSTCO GAS #1157</td><td style="text-align:right">−61.40</td></tr>
+                  <tr><td>22 Sep</td><td>AMAZON.COM*2K4</td><td style="text-align:right">−238.77</td></tr>
+                  <tr><td>18 Sep</td><td>AMEREN ILLINOIS</td><td style="text-align:right">−163.90</td></tr>
+                </tbody>
+              </table>
+              <sc-if value="{{ isDocSource }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid var(--color-accent-300); background:var(--color-accent-100); padding:var(--space-3); font-size:13px; color:var(--color-accent-900)">
+                  <strong>Extracted by Gemini.</strong> Statement period 20 Aug – 19 Sep 2026, account ending 4471, 61 line items, closing balance $1,842.06. Confidence high on 59 rows; 2 rows need a look (smudged amounts).
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- Step 3: defaults -->
+        <sc-if value="{{ isStep3 }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-4); align-items:start">
+            <div class="card blueprint" style="gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">Defaults</div><div class="card-title">Applied to fields the source doesn't carry</div>
+              <div class="field"><label>Account / institution</label><select class="input" defaultValue="{{ defAcct }}"><option>Chase Sapphire · Chase</option><option>USAA Checking · USAA</option><option>Costco Visa · Citi</option><option>Ally Savings · Ally</option></select></div>
+              <div class="field"><label>Category when unmatched</label><select class="input"><option>Uncategorized (AI suggests later)</option><option>Household</option><option>Groceries</option></select></div>
+              <div class="field"><label>Household member</label><select class="input"><option>Shared</option><option>JL</option><option>KL</option></select></div>
+              <div class="field"><label>Notes</label><input class="input" defaultValue="{{ defNotes }}"></div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:var(--space-4)">
+              <sc-if value="{{ isDocSource }}" hint-placeholder-val="{{ false }}">
+                <div class="card blueprint" style="gap:var(--space-2); border-color:var(--color-accent-400)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                  <div class="card-kicker">Read from the document</div>
+                  <div style="display:grid; grid-template-columns:auto 1fr; gap:4px 16px; font-size:13px">
+                    <span class="text-muted">Institution</span><span>JPMorgan Chase</span>
+                    <span class="text-muted">Account</span><span>Sapphire Preferred ···4471</span>
+                    <span class="text-muted">Period</span><span>20 Aug – 19 Sep 2026</span>
+                    <span class="text-muted">Sign convention</span><span>Charges positive → flipped to negative</span>
+                  </div>
+                  <div class="card-meta">Edit any value on the left; the document stays attached to the import batch.</div>
+                </div>
+              </sc-if>
+              <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                <div class="card-kicker">Category suggestions</div>
+                <div class="card-body">Gemini will propose a category for each unmatched row using your hierarchy (Utilities › Water, Auto › Fuel …) and merchant history. Suggestions are marked and can be bulk-accepted after import.</div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- Step 4: duplicates -->
+        <sc-if value="{{ isStep4 }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ dupPending }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex; flex-direction:column; gap:var(--space-4); max-width:920px">
+              <div style="display:flex; justify-content:space-between; align-items:baseline">
+                <div><div class="card-kicker">Potential duplicate {{ dupPos }} of {{ dupTotal }}</div><h3 style="margin:0">{{ pair.title }}</h3></div>
+                <span class="tag tag-accent">{{ pair.conf }} match</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4)">
+                <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                  <div class="card-kicker">Incoming · {{ srcFile }}</div>
+                  <div class="card-title">{{ pair.inDesc }}</div>
+                  <div style="font-family:var(--font-heading); font-weight:600; font-size:28px">{{ pair.inAmt }}</div>
+                  <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 14px; font-size:13px"><span class="text-muted">Date</span><span>{{ pair.inDate }}</span><span class="text-muted">Account</span><span>{{ pair.inAcct }}</span><span class="text-muted">Row</span><span>{{ pair.inRow }}</span></div>
+                </div>
+                <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                  <div class="card-kicker">Already in ledger</div>
+                  <div class="card-title">{{ pair.exDesc }}</div>
+                  <div style="font-family:var(--font-heading); font-weight:600; font-size:28px">{{ pair.exAmt }}</div>
+                  <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 14px; font-size:13px"><span class="text-muted">Date</span><span>{{ pair.exDate }}</span><span class="text-muted">Account</span><span>{{ pair.exAcct }}</span><span class="text-muted">Added</span><span>{{ pair.exAdded }}</span></div>
+                </div>
+              </div>
+              <div style="border:1px solid var(--color-accent-300); background:var(--color-accent-100); padding:var(--space-3); font-size:13px; color:var(--color-accent-900)">{{ pair.reason }}</div>
+              <div style="display:flex; gap:var(--space-2); align-items:center">
+                <button class="btn btn-primary blueprint" onClick="{{ markDup }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Same transaction — skip incoming</button>
+                <button class="btn btn-secondary" onClick="{{ keepBoth }}">Different — keep both</button>
+                <span class="text-muted" style="font-size:12px; margin-left:auto">“Keep both” is remembered; this pair won't be flagged again.</span>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ dupDone }}" hint-placeholder-val="{{ false }}">
+            <div class="card blueprint" style="max-width:560px; gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">Duplicate review</div><div class="card-title">All {{ dupTotal }} candidates decided</div>
+              <div style="font-size:14px">{{ dupSummary }}</div>
+              <button class="btn btn-ghost" style="align-self:flex-start" onClick="{{ resetDups }}">Start over</button>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- Step 5: review -->
+        <sc-if value="{{ isStep5 }}" hint-placeholder-val="{{ false }}">
+          <div class="card blueprint" style="max-width:640px; gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Ready to commit</div><div class="card-title">{{ srcFile }}</div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-3)">
+              <div><div style="font-family:var(--font-heading); font-weight:600; font-size:28px">{{ commitRows }}</div><div class="text-muted" style="font-size:12px">rows to insert</div></div>
+              <div><div style="font-family:var(--font-heading); font-weight:600; font-size:28px">{{ commitSkipped }}</div><div class="text-muted" style="font-size:12px">duplicates skipped</div></div>
+              <div><div style="font-family:var(--font-heading); font-weight:600; font-size:28px">{{ commitKept }}</div><div class="text-muted" style="font-size:12px">kept as separate</div></div>
+            </div>
+            <div class="card-body">Source file is stored in Postgres with the batch (bytea, sha-256 deduplicated) so every transaction links back to its origin. Import can be rolled back as a unit.</div>
+            <sc-if value="{{ committed }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent" style="align-self:flex-start">Committed · batch #418</span></sc-if>
+          </div>
+        </sc-if>
+
+        <footer style="display:flex; gap:var(--space-2); border-top:1px solid var(--color-divider); padding-top:var(--space-4)">
+          <button class="btn btn-secondary" onClick="{{ prevStep }}" disabled="{{ isStep1 }}">Back</button>
+          <sc-if value="{{ notLast }}" hint-placeholder-val="{{ true }}"><button class="btn btn-primary blueprint" onClick="{{ nextStep }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>{{ nextLabel }}</button></sc-if>
+          <sc-if value="{{ isStep5 }}" hint-placeholder-val="{{ false }}"><button class="btn btn-primary blueprint" onClick="{{ commit }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Commit {{ commitRows }} transactions</button></sc-if>
+        </footer>
+      </section>
+    </sc-if>
+
+    <!-- ===== BILLS & STATEMENTS ===== -->
+    <sc-if value="{{ isBills }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Bills" style="display:flex; flex-direction:column; gap:var(--space-4)">
+        <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap">
+          <div><h2 style="margin:0">Bills &amp; statements</h2><div class="text-muted" style="font-size:13px">Documents attached to transactions, with usage extracted per period</div></div>
+          <button class="btn btn-primary blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Upload statement</button>
+        </header>
+        <div style="display:grid; grid-template-columns:200px minmax(0,1fr); gap:var(--space-4); align-items:start">
+          <nav style="display:flex; flex-direction:column; gap:2px">
+            <sc-for list="{{ seriesList }}" as="sr" hint-placeholder-count="5">
+              <button onClick="{{ sr.go }}" style="display:flex; justify-content:space-between; width:100%; text-align:left; padding:8px 10px; border:1px solid {{ sr.border }}; background:{{ sr.bg }}; color:{{ sr.color }}; font:inherit; font-size:14px; cursor:pointer"><span>{{ sr.name }}</span><span style="font-size:11px; opacity:.7">{{ sr.count }}</span></button>
+            </sc-for>
+          </nav>
+          <div style="display:flex; flex-direction:column; gap:var(--space-4); min-width:0">
+            <sc-if value="{{ showAI }}" hint-placeholder-val="{{ true }}">
+              <div class="card blueprint" style="border-color:var(--color-accent-400); gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                <div style="display:flex; justify-content:space-between; align-items:baseline"><div><div class="card-kicker">Suggested assignment · needs approval</div><div class="card-title">CityWater_2026-09.pdf</div></div><span class="tag tag-accent">Uploaded 2 min ago</span></div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:var(--space-3); font-size:13px">
+                  <div><div class="text-muted" style="font-size:11px">Link to</div><div style="font-weight:500">25 Sep · City of Springfield Water · −$84.12</div></div>
+                  <div><div class="text-muted" style="font-size:11px">Series</div><div style="font-weight:500">Utilities › Water</div></div>
+                  <div><div class="text-muted" style="font-size:11px">Period</div><div style="font-weight:500">14 Aug – 13 Sep 2026</div></div>
+                  <div><div class="text-muted" style="font-size:11px">Usage</div><div style="font-weight:500">5,380 gal · $0.0156/gal</div></div>
+                </div>
+                <div style="display:flex; gap:var(--space-2)">
+                  <button class="btn btn-primary blueprint" onClick="{{ approveAI }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Approve</button>
+                  <button class="btn btn-secondary">Edit fields</button>
+                  <button class="btn btn-ghost" onClick="{{ approveAI }}">Dismiss</button>
+                </div>
+              </div>
+            </sc-if>
+            <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div style="display:flex; justify-content:space-between; align-items:baseline"><div><div class="card-kicker">{{ series.kicker }}</div><div class="card-title">{{ series.title }}</div></div><div style="display:flex; gap:var(--space-4); font-size:12px; color:var(--color-neutral-700)"><span>12-mo avg <strong style="color:var(--color-text)">{{ series.avg }}</strong></span><span>Latest <strong style="color:var(--color-text)">{{ series.latest }}</strong></span></div></div>
+              <svg viewBox="0 0 640 180" width="100%" style="display:block">
+                <line x1="0" y1="160" x2="640" y2="160" stroke="var(--color-divider)"></line>
+                <line x1="0" y1="{{ series.avgY }}" x2="640" y2="{{ series.avgY }}" stroke="var(--color-accent-500)" stroke-dasharray="3 4"></line>
+                <polyline points="{{ series.points }}" fill="none" stroke="var(--color-accent-700)" stroke-width="1.5"></polyline>
+                <sc-for list="{{ series.dots }}" as="d" hint-placeholder-count="12">
+                  <circle cx="{{ d.x }}" cy="{{ d.y }}" r="3" fill="var(--color-bg)" stroke="var(--color-accent-700)" stroke-width="1.5"></circle>
+                  <text x="{{ d.x }}" y="176" font-size="10" text-anchor="middle" fill="var(--color-neutral-600)" font-family="Barlow">{{ d.label }}</text>
+                </sc-for>
+              </svg>
+            </div>
+            <div class="card blueprint" style="padding:0"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <table class="table">
+                <thead><tr><th>Statement</th><th>Period</th><th>Usage</th><th>Linked transaction</th><th style="text-align:right">Amount</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ series.rows }}" as="r" hint-placeholder-count="5">
+                    <tr><td style="font-weight:500">{{ r.file }}</td><td class="text-muted">{{ r.period }}</td><td style="font-variant-numeric:tabular-nums">{{ r.usage }}</td><td><a href="#" onClick="{{ goTransactions }}" style="font-size:13px">{{ r.tx }}</a></td><td style="text-align:right; font-variant-numeric:tabular-nums">{{ r.amt }}</td></tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== BUDGETS ===== -->
+    <sc-if value="{{ isBudgets }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Budgets" style="display:flex; flex-direction:column; gap:var(--space-4)">
+        <header style="display:flex; align-items:flex-end; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap">
+          <div><h2 style="margin:0">Budgets</h2><div class="text-muted" style="font-size:13px">{{ periodLabel }} · annual and one-off payments spread by rule</div></div>
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="per" checked="{{ perMonth }}" onChange="{{ setPerMonth }}">Month</label>
+            <label class="seg-opt"><input type="radio" name="per" checked="{{ perQuarter }}" onChange="{{ setPerQuarter }}">Quarter</label>
+            <label class="seg-opt"><input type="radio" name="per" checked="{{ perYear }}" onChange="{{ setPerYear }}">Year</label>
+          </div>
+        </header>
+        <div style="display:grid; grid-template-columns:minmax(0,2fr) minmax(260px,1fr); gap:var(--space-4); align-items:start">
+          <div class="card blueprint" style="padding:0"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <table class="table">
+              <thead><tr><th>Category</th><th style="width:36%">Progress</th><th style="text-align:right">Spent</th><th style="text-align:right">Budget</th><th style="text-align:right">Left</th></tr></thead>
+              <tbody>
+                <sc-for list="{{ budgetRows }}" as="b" hint-placeholder-count="7">
+                  <tr>
+                    <td><div style="font-weight:500">{{ b.c }}</div><div style="font-size:11px; color:var(--color-neutral-700)">{{ b.note }}</div></td>
+                    <td><div style="height:8px; border:1px solid var(--color-divider); position:relative"><div style="position:absolute; inset:0; width:{{ b.pct }}%; background:{{ b.fill }}"></div></div></td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums">{{ b.spent }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums" class="text-muted">{{ b.budget }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums; color:{{ b.color }}">{{ b.left }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:var(--space-4)">
+            <div class="card blueprint" style="gap:4px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">Total</div>
+              <div style="font-family:var(--font-heading); font-weight:600; font-size:30px; line-height:1">{{ budgetTotal.spent }} <span style="font-size:16px; color:var(--color-neutral-600)">of {{ budgetTotal.budget }}</span></div>
+              <div class="card-meta">{{ budgetTotal.note }}</div>
+            </div>
+            <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+              <div class="card-kicker">Spread rules</div>
+              <div style="font-size:13px; display:flex; flex-direction:column; gap:6px">
+                <div style="display:flex; justify-content:space-between"><span>State Farm Auto · $1,284/yr</span><span class="text-muted">→ $107/mo</span></div>
+                <div style="display:flex; justify-content:space-between"><span>Property tax · $4,860/yr</span><span class="text-muted">→ $405/mo</span></div>
+                <div style="display:flex; justify-content:space-between"><span>Amazon Prime · $139/yr</span><span class="text-muted">→ $11.58/mo</span></div>
+              </div>
+              <button class="btn btn-ghost" style="align-self:flex-start">Add rule</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== CHAT ===== -->
+    <sc-if value="{{ isChat }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Chat" style="display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:var(--space-4); min-height:calc(100vh - 2 * var(--space-8))">
+        <header><h2 style="margin:0">Ask the ledger</h2><div class="text-muted" style="font-size:13px">Questions run against your transactions, budgets and attached statements. Documents you drop here can be attached to the ledger.</div></header>
+        <div style="display:flex; flex-direction:column; gap:var(--space-4); max-width:820px; overflow:auto; padding-right:var(--space-2)">
+          <sc-for list="{{ messages }}" as="m" hint-placeholder-count="4">
+            <div style="display:flex; flex-direction:column; gap:6px; align-items:{{ m.align }}">
+              <div style="font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--color-neutral-600)">{{ m.who }}</div>
+              <div class="blueprint" style="max-width:72ch; padding:var(--space-3) var(--space-4); background:{{ m.bg }}; color:{{ m.color }}; font-size:14px; white-space:pre-wrap; line-height:1.5"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>{{ m.text }}</div>
+              <sc-if value="{{ m.hasDoc }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline">{{ m.doc }}</span></sc-if>
+              <sc-if value="{{ m.hasActions }}" hint-placeholder-val="{{ false }}"><div style="display:flex; gap:var(--space-2)"><button class="btn btn-primary blueprint" onClick="{{ goBills }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Attach to 25 Sep transaction</button><button class="btn btn-secondary">Not now</button></div></sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex; gap:var(--space-2); max-width:820px">
+          <button class="btn btn-secondary btn-icon" title="Attach document">+</button>
+          <input class="input" placeholder="e.g. What did we spend on the F-150 this year, including insurance?" value="{{ chatInput }}" onChange="{{ onChat }}" onKeyDown="{{ onChatKey }}">
+          <button class="btn btn-primary blueprint" onClick="{{ sendChat }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Send</button>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== ALERTS ===== -->
+    <sc-if value="{{ isAlerts }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Alerts" style="display:flex; flex-direction:column; gap:var(--space-4); max-width:860px">
+        <header><h2 style="margin:0">Email alerts</h2><div class="text-muted" style="font-size:13px">Rules run after each sync or import. Sent through the SMTP relay in your environment.</div></header>
+        <div class="card blueprint" style="padding:0"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ alertRules }}" as="r" hint-placeholder-count="4">
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--space-4); padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-divider); align-items:center">
+              <div><div style="font-weight:500">{{ r.title }}</div><div style="font-size:13px; color:var(--color-neutral-700)">{{ r.desc }}</div></div>
+              <div class="seg"><label class="seg-opt"><input type="radio" name="{{ r.id }}" checked="{{ r.on }}" onChange="{{ r.turnOn }}">On</label><label class="seg-opt"><input type="radio" name="{{ r.id }}" checked="{{ r.off }}" onChange="{{ r.turnOff }}">Off</label></div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4)">
+          <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Recipients</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap"><span class="tag tag-neutral">j••••@outlook.com</span><span class="tag tag-neutral">k••••@gmail.com</span></div>
+            <input class="input" placeholder="Add address">
+          </div>
+          <div class="card blueprint" style="gap:var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div class="card-kicker">Last sent</div>
+            <div style="font-size:13px; display:flex; flex-direction:column; gap:4px">
+              <div style="display:flex; justify-content:space-between"><span>Out-of-norm · Home Depot $412.06</span><span class="text-muted">27 Sep</span></div>
+              <div style="display:flex; justify-content:space-between"><span>Budget · Dining 153% of month</span><span class="text-muted">24 Sep</span></div>
+              <div style="display:flex; justify-content:space-between"><span>Weekly digest</span><span class="text-muted">22 Sep</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- ===== SOURCES ===== -->
+    <sc-if value="{{ isSources }}" hint-placeholder-val="{{ false }}">
+      <section data-screen-label="Sources" style="display:flex; flex-direction:column; gap:var(--space-6)">
+        <header><h2 style="margin:0">Sources &amp; backfill</h2><div class="text-muted" style="font-size:13px">Where transactions come from, and the historical archive being processed</div></header>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:var(--space-4)">
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex; justify-content:space-between"><div class="card-kicker">Tiller</div><span class="tag tag-accent">Connected</span></div>
+            <div class="card-title">Google Sheet feed</div>
+            <p class="card-body">Pulled daily via Sheets API. 9 accounts · 318 rows this month · last 6:02 am. Column preset “Tiller” applied.</p>
+            <div class="card-meta">Cost: existing annual subscription</div>
+          </div>
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex; justify-content:space-between"><div class="card-kicker">Plaid</div><span class="tag tag-outline">Evaluating</span></div>
+            <div class="card-title">Direct aggregation</div>
+            <p class="card-body">Development tier supports up to 100 Items free; production requires approval and per-connection pricing. Covers checking, cards and brokerage; TSP not supported.</p>
+            <div class="card-meta">Decide after 30-day sandbox trial</div>
+          </div>
+          <div class="card blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex; justify-content:space-between"><div class="card-kicker">Manual</div><span class="tag tag-neutral">Always on</span></div>
+            <div class="card-title">Uploads &amp; watch folder</div>
+            <p class="card-body">Drop files in the UI or in the mounted /inbox volume; the worker picks them up and routes them through import.</p>
+            <div class="card-meta">Home, vehicles, TSP entered here</div>
+          </div>
+        </div>
+        <div class="card blueprint" style="gap:var(--space-3)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:var(--space-2)">
+            <div><div class="card-kicker">Backfill queue</div><div class="card-title">1,240 of 2,014 files processed · 2006 – 2026</div></div>
+            <div style="display:flex; gap:var(--space-2)"><button class="btn btn-secondary">Pause</button><button class="btn btn-ghost">Review 38 flagged</button></div>
+          </div>
+          <div style="height:10px; border:1px solid var(--color-divider); position:relative"><div style="position:absolute; inset:0; width:61.6%; background:var(--color-accent)"></div></div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:var(--space-3); font-size:13px">
+            <div><div class="text-muted" style="font-size:11px">Bank statements</div><div>612 / 890</div></div>
+            <div><div class="text-muted" style="font-size:11px">Card statements</div><div>401 / 640</div></div>
+            <div><div class="text-muted" style="font-size:11px">Utility bills</div><div>209 / 452</div></div>
+            <div><div class="text-muted" style="font-size:11px">Spreadsheets</div><div>18 / 32</div></div>
+            <div><div class="text-muted" style="font-size:11px">Transactions added</div><div>38,412</div></div>
+            <div><div class="text-muted" style="font-size:11px">Duplicates auto-resolved</div><div>9,206</div></div>
+          </div>
+          <table class="table">
+            <thead><tr><th>File</th><th>Detected</th><th>Result</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td>USAA_Checking_2014-07.pdf</td><td class="text-muted">Statement · USAA ···2210</td><td>44 rows</td><td><span class="tag tag-accent">Parsed</span></td></tr>
+              <tr><td>Ameren_2019-01.pdf</td><td class="text-muted">Utility bill · Electric</td><td>1,412 kWh · linked</td><td><span class="tag tag-accent">Parsed</span></td></tr>
+              <tr><td>transactions_2012.xlsx</td><td class="text-muted">Spreadsheet · 3 tabs</td><td>Overlaps 2012 statements</td><td><span class="tag tag-outline">Needs review</span></td></tr>
+              <tr><td>scan_0043.pdf</td><td class="text-muted">Unknown · low OCR confidence</td><td>—</td><td><span class="tag tag-outline">Needs review</span></td></tr>
+              <tr><td>Chase_2021-03.pdf</td><td class="text-muted">Statement · Chase ···4471</td><td>Same sha-256 as Chase_2021-03 (1).pdf</td><td><span class="tag tag-neutral">Skipped</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </sc-if>
+
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dashboard&quot;,&quot;options&quot;:[&quot;dashboard&quot;,&quot;transactions&quot;,&quot;import&quot;,&quot;bills&quot;,&quot;budgets&quot;,&quot;chat&quot;,&quot;alerts&quot;,&quot;sources&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;aiSuggestions&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;householdMode&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+class Component extends DCLogic {
+  state = { screen: null, sel: null, txFilter: 'all', scanDone: false, step: 1, source: 'sheet', dup: 0, decisions: [], committed: false, series: 'Water', showAI: true, period: 'Month', chatInput: '', extraMsgs: [], alerts: { over: true, norm: true, large: false, digest: true } };
+
+  fmt(n, plus) { const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return (n < 0 ? '−' : (plus ? '+' : '')) + '$' + s; }
+  go(screen) { return () => this.setState({ screen, sel: null }); }
+
+  renderVals() {
+    const S = this.state, P = this.props;
+    const screen = S.screen ?? P.startScreen ?? 'dashboard';
+    const household = P.householdMode ?? true;
+    const ai = P.aiSuggestions ?? true;
+    const acc = 'var(--color-accent)', acc7 = 'var(--color-accent-700)', ink = 'var(--color-text)';
+
+    const nav = [
+      ['dashboard', 'Dashboard', 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', ''],
+      ['transactions', 'Transactions', 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01', '2'],
+      ['import', 'Import', 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12', ''],
+      ['bills', 'Bills & statements', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8', ai && S.showAI ? '1' : ''],
+      ['budgets', 'Budgets', 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zM12 6a6 6 0 1 0 0 12 6 6 0 1 0 0-12zM12 10a2 2 0 1 0 0 4 2 2 0 1 0 0-4z', ''],
+      ['chat', 'Ask the ledger', 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', ''],
+      ['alerts', 'Alerts', 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0', ''],
+      ['sources', 'Sources & backfill', 'M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zM4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6', ''],
+    ];
+    const navItems = nav.map(([id, label, icon, badge]) => { const on = screen === id; return { id, label, icon, badge, go: this.go(id), bg: on ? 'var(--color-accent-100)' : 'transparent', color: on ? 'var(--color-accent-900)' : ink, border: on ? 'var(--color-accent-300)' : 'transparent' }; });
+
+    // Dashboard
+    const stats = [
+      { k: 'Net worth', v: '$956,392', m: '+$4,180 vs Aug · incl. home & vehicles' },
+      { k: 'Spent · Sep', v: '$4,612', m: '12-mo avg $4,290 · +7.5%' },
+      { k: 'Income · Sep', v: '$6,825', m: 'Salary + TSP match' },
+      { k: 'Budget left', v: '$388', m: '2 of 7 categories over' },
+    ];
+    const inc = [6650, 6650, 6820, 6650, 6650, 9140, 6820, 6820, 6820, 6825, 6825, 6825];
+    const exp = [4380, 4100, 5210, 4020, 4460, 6880, 4290, 4150, 4740, 3980, 4520, 4612];
+    const labels = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+    const scale = 200 / 10000;
+    const months = labels.map((label, i) => { const x = 12 + i * 52; return { label, x, x2: x + 18, tx: x + 17, hInc: inc[i] * scale, yInc: 200 - inc[i] * scale, hExp: exp[i] * scale, yExp: 200 - exp[i] * scale }; });
+    const anomalies = [
+      { t: 'Home Depot · 14 Sep', v: '$412.06', d: 'Home › Maintenance is 3.1× its monthly norm ($134)', tag: 'Category spike' },
+      { t: 'Amazon.com · 22 Sep', v: '$238.77', d: '2.4× the 90-day average Amazon order ($98)', tag: 'Large for merchant' },
+      { t: 'Dining · month to date', v: '$612', d: 'Trailing average $380 · +61% with 8 days left', tag: 'Pace' },
+    ];
+    const accounts = [
+      ['USAA Checking', 'USAA', 6412], ['Ally Savings', 'Ally', 24800], ['USAA Savings', 'USAA', 9150],
+      ['Chase Sapphire', 'Chase', -1842.06], ['Costco Visa', 'Citi', -611.4], ['Amazon Prime Visa', 'Chase', -238.77], ['Citi Double Cash', 'Citi', -79.99], ['Capital One Venture', 'Capital One', 0],
+      ['TSP', 'Thrift Savings Plan', 312400], ['Rollover IRA', 'Vanguard', 148900], ['Home', 'Zillow estimate', 412000], ['2022 Outback', 'KBB', 24500], ['2018 F-150', 'KBB', 21000],
+    ].map(([n, i, b]) => ({ n, i, b: this.fmt(b) }));
+
+    // Budgets
+    const base = [
+      ['Groceries', 720, 650, ''], ['Dining', 612, 400, 'alert sent 24 Sep'], ['Utilities', 328.01, 400, 'water, electric, gas, internet'], ['Household', 366.4, 250, ''], ['Auto › Fuel', 184.2, 200, ''], ['Insurance › Auto', 107, 107, 'spread from $1,284 annual'], ['Entertainment', 92, 150, ''],
+    ];
+    const mult = S.period === 'Month' ? 1 : S.period === 'Quarter' ? 3 : 12;
+    const budgetRows = base.map(([c, spent, budget, note]) => { const sp = spent * (mult === 1 ? 1 : mult * 0.93), bu = budget * mult; const pct = Math.min(100, sp / bu * 100); const over = sp > bu; return { c, note, pct, fill: over ? acc7 : 'var(--color-accent-400)', spent: this.fmt(sp), budget: this.fmt(bu), left: (over ? '−' : '') + this.fmt(Math.abs(bu - sp)), color: over ? acc7 : ink, label: this.fmt(sp) + ' / ' + this.fmt(bu) }; });
+    const tot = budgetRows.reduce((a, r, i) => { a.s += base[i][1] * (mult === 1 ? 1 : mult * 0.93); a.b += base[i][2] * mult; return a; }, { s: 0, b: 0 });
+    const budgetTotal = { spent: this.fmt(tot.s), budget: this.fmt(tot.b), note: tot.s > tot.b ? 'Over by ' + this.fmt(tot.s - tot.b) : this.fmt(tot.b - tot.s) + ' remaining' };
+
+    // Transactions
+    const txs = [
+      { id: 1, date: '26 Sep', desc: 'Kroger #412', cat: 'Groceries', acct: 'Chase Sapphire', amt: -142.18, added: 'today 6:02 am', notes: '', dup: 'No candidates within ±3 days.' },
+      { id: 2, date: '25 Sep', desc: 'City of Springfield Water', cat: 'Utilities › Water', acct: 'USAA Checking', amt: -84.12, att: ['CityWater_2026-09.pdf', '5,380 gal · 14 Aug – 13 Sep'], added: 'today 6:02 am', notes: 'Autopay', dup: 'No candidates within ±3 days.' },
+      { id: 3, date: '24 Sep', desc: 'Costco Gas #1157', cat: 'Auto › Fuel', acct: 'Costco Visa', amt: -61.4, added: '25 Sep', notes: '', dup: 'No candidates within ±3 days.' },
+      { id: 4, date: '22 Sep', desc: 'Amazon.com', cat: 'Household', acct: 'Amazon Prime Visa', amt: -238.77, flag: true, added: '23 Sep', notes: 'Shop vac + filters', dup: 'No candidates within ±3 days.' },
+      { id: 5, date: '20 Sep', desc: 'Payroll deposit', cat: 'Income › Salary', acct: 'USAA Checking', amt: 3412.55, added: '20 Sep', notes: '', dup: 'Recurring; pattern trusted since 2014.' },
+      { id: 6, date: '18 Sep', desc: 'Ameren Electric', cat: 'Utilities › Electric', acct: 'USAA Checking', amt: -163.9, att: ['Ameren_2026-09.pdf', '1,206 kWh · 15 Aug – 14 Sep'], added: '19 Sep', notes: 'Autopay', dup: 'No candidates within ±3 days.' },
+      { id: 7, date: '15 Sep', desc: 'State Farm Auto', cat: 'Insurance › Auto', acct: 'USAA Checking', amt: -1284, spread: true, added: '16 Sep', notes: 'Annual premium, both vehicles', dup: 'No candidates within ±3 days.' },
+      { id: 8, date: '14 Sep', desc: 'Home Depot', cat: 'Home › Maintenance', acct: 'Chase Sapphire', amt: -412.06, flag: true, added: '15 Sep', notes: '', dup: 'No candidates within ±3 days.' },
+      { id: 9, date: '12 Sep', desc: 'Spectrum Internet', cat: 'Utilities › Internet', acct: 'Citi Double Cash', amt: -79.99, att: ['Spectrum_2026-09.pdf', '500 Mbps · Sep'], added: '13 Sep', notes: '', dup: 'No candidates within ±3 days.' },
+      { id: 10, date: '10 Sep', desc: 'Transfer to Ally Savings', cat: 'Transfer', acct: 'USAA Checking', amt: -500, added: '10 Sep', notes: '', dup: 'Paired with Ally deposit 11 Sep (transfer).' },
+      { id: 11, date: '08 Sep', desc: "Trader Joe's", cat: 'Groceries', acct: 'Chase Sapphire', amt: -88.34, added: '09 Sep', notes: '', dup: 'Confirmed separate from Trader Joe\'s 08 Sep $88.34 (Costco Visa) on 12 Sep.' },
+      { id: 12, date: '05 Sep', desc: 'TSP contribution', cat: 'Retirement', acct: 'TSP', amt: 520, added: '05 Sep', notes: 'Employee + 5% match', dup: 'Recurring; pattern trusted.' },
+    ];
+    const filtered = txs.filter(t => S.txFilter === 'all' || (S.txFilter === 'flag' && t.flag) || (S.txFilter === 'bills' && t.att));
+    const txRows = filtered.map(t => ({ ...t, amt: this.fmt(t.amt, true), amtColor: t.amt > 0 ? acc7 : ink, marks: [t.att ? 'statement' : '', t.flag ? 'flagged' : '', t.spread ? 'spread' : ''].filter(Boolean).join(' · '), rowBg: S.sel === t.id ? 'var(--color-accent-100)' : 'transparent', select: () => this.setState({ sel: t.id }) }));
+    const raw = txs.find(t => t.id === S.sel);
+    const sel = raw ? { ...raw, amt: this.fmt(raw.amt, true), month: 'September', spread: !!raw.spread, notSpread: !raw.spread, perMonth: this.fmt(Math.abs(raw.amt) / 12), hasAtt: !!raw.att, noAtt: !raw.att, attName: raw.att ? raw.att[0] : '', attMeta: raw.att ? raw.att[1] : '', dupNote: raw.dup } : {};
+
+    // Import
+    const stepNames = ['Source', 'Map columns', 'Defaults', 'Duplicates', 'Review'];
+    const steps = stepNames.map((label, i) => { const n = i + 1, on = S.step === n, done = S.step > n; return { n: String(n).padStart(2, '0'), label, go: () => this.setState({ step: n }), line: on ? acc : done ? 'var(--color-accent-400)' : 'var(--color-divider)', color: on ? ink : done ? acc7 : 'var(--color-neutral-600)' }; });
+    const isDoc = S.source === 'doc';
+    const pairs = [
+      { title: 'Ameren Electric · 18 Sep', conf: '96%', inDesc: 'AMEREN ILLINOIS', inAmt: '−$163.90', inDate: '18 Sep 2026', inAcct: isDoc ? 'Sapphire ···4471 (from document)' : 'Chase Sapphire (default)', inRow: '17', exDesc: 'Ameren Electric', exAmt: '−$163.90', exDate: '18 Sep 2026', exAcct: 'USAA Checking', exAdded: '19 Sep via Tiller', reason: 'Same amount and date; description normalizes to the same merchant. Account differs — likely the same bill captured from two feeds. Recommended: skip incoming.' },
+      { title: "Trader Joe's · 08 Sep", conf: '98%', inDesc: "TRADER JOE'S #702", inAmt: '−$88.34', inDate: '08 Sep 2026', inAcct: 'Chase Sapphire', inRow: '41', exDesc: "Trader Joe's", exAmt: '−$88.34', exDate: '08 Sep 2026', exAcct: 'Chase Sapphire', exAdded: '09 Sep via Tiller', reason: 'Exact match on amount, date, account and merchant. Recommended: skip incoming.' },
+      { title: 'Kroger #412 · 24 vs 26 Sep', conf: '71%', inDesc: 'KROGER #412 SPRINGFIELD', inAmt: '−$142.18', inDate: '24 Sep 2026', inAcct: 'Chase Sapphire', inRow: '3', exDesc: 'Kroger #412', exAmt: '−$142.18', exDate: '26 Sep 2026', exAcct: 'Chase Sapphire', exAdded: 'today via Tiller', reason: 'Amount and merchant match, dates differ by 2 days — consistent with transaction date vs posted date. You shop here weekly, so a repeat is plausible. Your call.' },
+    ];
+    const dupTotal = pairs.length, dupPending = S.dup < dupTotal;
+    const skipped = S.decisions.filter(d => d === 'dup').length, kept = S.decisions.length - skipped;
+    const srcRows = isDoc ? 61 : 318;
+    const commitRows = srcRows - skipped;
+
+    // Bills
+    const seriesData = {
+      Water: { kicker: 'Utilities › Water · City of Springfield', unit: 'gal', vals: [4120, 3980, 3760, 3540, 3610, 3890, 4210, 4580, 5020, 5310, 5140, 5380], amts: [70.1, 68.4, 66.0, 63.8, 64.5, 67.4, 71.0, 75.1, 80.3, 83.4, 81.6, 84.12], count: 118 },
+      Electric: { kicker: 'Utilities › Electric · Ameren', unit: 'kWh', vals: [980, 1040, 1190, 1310, 1220, 990, 860, 920, 1140, 1380, 1290, 1206], amts: [131, 138, 158, 172, 161, 133, 118, 125, 152, 182, 171, 163.9], count: 132 },
+      'Natural gas': { kicker: 'Utilities › Gas · Nicor', unit: 'therms', vals: [42, 88, 141, 168, 152, 104, 51, 24, 18, 16, 17, 21], amts: [48, 84, 129, 151, 138, 98, 55, 31, 26, 25, 26, 29], count: 126 },
+      Internet: { kicker: 'Utilities › Internet · Spectrum', unit: 'Mbps', vals: [400, 400, 400, 400, 400, 500, 500, 500, 500, 500, 500, 500], amts: [69.99, 69.99, 69.99, 69.99, 69.99, 79.99, 79.99, 79.99, 79.99, 79.99, 79.99, 79.99], count: 84 },
+      'Auto insurance': { kicker: 'Insurance › Auto · State Farm', unit: 'vehicles', vals: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], amts: [1190, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1284], count: 22 },
+    };
+    const seriesList = Object.keys(seriesData).map(name => { const on = S.series === name; return { name, count: seriesData[name].count, go: () => this.setState({ series: name }), bg: on ? 'var(--color-accent-100)' : 'transparent', color: on ? 'var(--color-accent-900)' : ink, border: on ? 'var(--color-accent-300)' : 'var(--color-divider)' }; });
+    const sd = seriesData[S.series];
+    const max = Math.max(...sd.vals) * 1.15, avgV = sd.vals.reduce((a, b) => a + b, 0) / 12;
+    const yOf = v => 160 - v / max * 140;
+    const dots = sd.vals.map((v, i) => ({ x: 20 + i * 54.5, y: yOf(v), label: labels[i] }));
+    const series = { kicker: sd.kicker, title: 'Usage · ' + sd.unit + ' per statement period', avg: Math.round(avgV).toLocaleString() + ' ' + sd.unit, latest: sd.vals[11].toLocaleString() + ' ' + sd.unit, avgY: yOf(avgV), points: dots.map(d => d.x + ',' + d.y).join(' '), dots,
+      rows: [11, 10, 9, 8, 7].map(i => ({ file: S.series.replace(/\s/g, '') + '_2026-' + String(i + 1 - 0).padStart(2, '0') + '.pdf', period: labels[i] + ' 2026', usage: sd.vals[i].toLocaleString() + ' ' + sd.unit, tx: sd.amts[i] ? labels[i] + ' · ' + sd.kicker.split('·')[1].trim() : '— (no payment this period)', amt: sd.amts[i] ? this.fmt(-sd.amts[i]) : '—' })) };
+
+    // Chat
+    const baseMsgs = [
+      { who: 'You', text: 'How has our water usage changed over the last 12 months, and are we paying more per gallon?' },
+      { who: 'Ledger', text: 'Usage is up. Trailing 12 months you used 52,540 gal, averaging 4,378 gal per period; the last four statements (Jun–Sep) averaged 5,213 gal, about 19% above the year. Cost per gallon moved from $0.0170 (Oct 2025) to $0.0156 (Sep 2026), so the rate is slightly lower — the higher bills are usage, not price. The June step-up lines up with the irrigation timer note on your 12 Jun Home Depot transaction.' },
+      { who: 'You', text: 'Here is this month\'s bill. Is it in line?', doc: 'CityWater_2026-09.pdf · 2 pages' },
+      { who: 'Ledger', text: 'CityWater_2026-09.pdf covers 14 Aug – 13 Sep 2026: 5,380 gal, $84.12, due 30 Sep. That is 22% above your 12-month average and 4% above last month. It matches the 25 Sep payment of −$84.12 from USAA Checking, which has no statement attached yet.', actions: true },
+    ];
+    const messages = [...baseMsgs, ...S.extraMsgs].map(m => { const me = m.who === 'You'; return { ...m, align: me ? 'flex-end' : 'flex-start', bg: me ? 'var(--color-accent-900)' : 'transparent', color: me ? 'var(--color-bg)' : ink, hasDoc: !!m.doc, hasActions: !!m.actions }; });
+    const sendChat = () => { const q = S.chatInput.trim(); if (!q) return; this.setState({ chatInput: '', extraMsgs: [...S.extraMsgs, { who: 'You', text: q }, { who: 'Ledger', text: 'Working from 1,214 transactions in 2026 and 6 attached statements… (prototype — the live app would answer here via Gemini with SQL over the personal_finances schema.)' }] }); };
+
+    // Alerts
+    const ruleDefs = [
+      ['over', 'Budget overspend', 'When any category passes 100% of its period budget, or is on pace to by month end.'],
+      ['norm', 'Out-of-norm spending', 'Transaction or category total more than 2σ above its trailing 12-month norm.'],
+      ['large', 'Large single transaction', 'Any debit over $500 outside known recurring payments.'],
+      ['digest', 'Weekly digest', 'Monday summary: spend vs budget, new statements, backfill progress.'],
+    ];
+    const alertRules = ruleDefs.map(([id, title, desc]) => ({ id, title, desc, on: S.alerts[id], off: !S.alerts[id], turnOn: () => this.setState({ alerts: { ...S.alerts, [id]: true } }), turnOff: () => this.setState({ alerts: { ...S.alerts, [id]: false } }) }));
+
+    return {
+      navItems, isDashboard: screen === 'dashboard', isTransactions: screen === 'transactions', isImport: screen === 'import', isBills: screen === 'bills', isBudgets: screen === 'budgets', isChat: screen === 'chat', isAlerts: screen === 'alerts', isSources: screen === 'sources',
+      goImport: this.go('import'), goChat: this.go('chat'), goTransactions: this.go('transactions'), goBudgets: this.go('budgets'), goBills: this.go('bills'),
+      stats, months, anomalies, accounts, budgets: budgetRows.slice(0, 6),
+      txRows, sel, hasSel: !!raw, detailCol: raw ? 'minmax(240px,300px)' : '0px', clearSel: () => this.setState({ sel: null }),
+      txAll: S.txFilter === 'all', txFlag: S.txFilter === 'flag', txBills: S.txFilter === 'bills', setTxAll: () => this.setState({ txFilter: 'all' }), setTxFlag: () => this.setState({ txFilter: 'flag' }), setTxBills: () => this.setState({ txFilter: 'bills' }),
+      scanDone: S.scanDone, runDupScan: () => this.setState({ scanDone: true }),
+      steps, isStep1: S.step === 1, isStep2: S.step === 2, isStep3: S.step === 3, isStep4: S.step === 4, isStep5: S.step === 5, notLast: S.step < 5, nextLabel: S.step === 4 && dupPending ? 'Skip remaining, continue' : 'Continue',
+      prevStep: () => this.setState({ step: Math.max(1, S.step - 1) }), nextStep: () => this.setState({ step: Math.min(5, S.step + 1) }),
+      pickSheet: () => this.setState({ source: 'sheet', step: 2 }), pickDoc: () => this.setState({ source: 'doc', step: 2 }),
+      isDocSource: isDoc, srcLabel: isDoc ? 'Document · extracted by Gemini' : 'Spreadsheet', srcFile: isDoc ? 'Chase_Sapphire_2026-09.pdf' : 'Tiller_Transactions_Sep.csv', srcRows, srcPreset: isDoc ? 'Chase statement' : 'Tiller',
+      mapping: isDoc ? [
+        { src: 'Transaction date', sample: '09/18', to: 'Transaction date' }, { src: 'Post date', sample: '09/19', to: 'Posted date' }, { src: 'Description', sample: 'AMEREN ILLINOIS', to: 'Description' }, { src: 'Amount', sample: '163.90', to: 'Amount' }, { src: 'Category (statement)', sample: 'Bills & Utilities', to: '— ignore —' },
+      ] : [
+        { src: 'Date', sample: '2026-09-26', to: 'Transaction date' }, { src: 'Description', sample: 'KROGER #412 SPRINGFIELD', to: 'Description' }, { src: 'Amount', sample: '-142.18', to: 'Amount' }, { src: 'Account', sample: 'Sapphire Preferred', to: 'Account' }, { src: 'Category', sample: 'Groceries', to: 'Category' }, { src: 'Check Number', sample: '', to: '— ignore —' }, { src: 'Note', sample: '', to: 'Notes' },
+      ],
+      defAcct: isDoc ? 'Chase Sapphire · Chase' : 'USAA Checking · USAA', defNotes: isDoc ? 'Imported from Chase_Sapphire_2026-09.pdf' : 'Imported from Tiller',
+      dupPending, dupDone: !dupPending, dupPos: Math.min(S.dup + 1, dupTotal), dupTotal, pair: pairs[Math.min(S.dup, dupTotal - 1)],
+      markDup: () => this.setState({ dup: S.dup + 1, decisions: [...S.decisions, 'dup'] }), keepBoth: () => this.setState({ dup: S.dup + 1, decisions: [...S.decisions, 'keep'] }), resetDups: () => this.setState({ dup: 0, decisions: [] }),
+      dupSummary: skipped + ' skipped as duplicates, ' + kept + ' kept as separate and remembered.', commitRows, commitSkipped: skipped, commitKept: kept, committed: S.committed, commit: () => this.setState({ committed: true }),
+      seriesList, series, showAI: ai && S.showAI, approveAI: () => this.setState({ showAI: false }),
+      budgetRows, budgetTotal, periodLabel: S.period === 'Month' ? 'September 2026' : S.period === 'Quarter' ? 'Q3 2026' : '2026 year to date', perMonth: S.period === 'Month', perQuarter: S.period === 'Quarter', perYear: S.period === 'Year', setPerMonth: () => this.setState({ period: 'Month' }), setPerQuarter: () => this.setState({ period: 'Quarter' }), setPerYear: () => this.setState({ period: 'Year' }),
+      messages, chatInput: S.chatInput, onChat: e => this.setState({ chatInput: e.target.value }), onChatKey: e => { if (e.key === 'Enter') sendChat(); }, sendChat,
+      alertRules, household,
+    };
+  }
+}
+</script>
+</body>
+</html>

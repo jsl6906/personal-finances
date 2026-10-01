@@ -1,0 +1,27 @@
+# Deploy on the home server:  docker compose up -d --build   (reads ./.env)
+services:
+  ledger:
+    build: .
+    image: ledger:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${LEDGER_PORT:-8470}:8000"
+    # Put the Google service-account key here and set GOOGLE_SERVICE_ACCOUNT_FILE=/secrets/google-sa.json
+    volumes:
+      - ./secrets:/secrets:ro
+      # Optional local archive for the backfill (set INBOX_DIR=/inbox); point the host side at your statements folder
+      - ${INBOX_HOST_DIR:-./inbox}:/inbox:ro
+    mem_limit: 1536m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
