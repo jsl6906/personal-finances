@@ -8,9 +8,15 @@ docker build --platform linux/amd64 -t $tag $root
 if ($LASTEXITCODE) { throw "docker build failed" }
 
 New-Item -ItemType Directory -Force "$Share\container_files" | Out-Null
-$tar = "$Share\container_files\" + ($tag -replace ":", "-") + ".tar"
-docker save -o $tar $tag
+$name = ($tag -replace ":", "-") + ".tar"
+# docker save straight to the SMB share can leave an empty file
+$local = Join-Path $env:TEMP $name
+docker save -o $local $tag
 if ($LASTEXITCODE) { throw "docker save failed" }
+$tar = "$Share\container_files\$name"
+Copy-Item $local $tar -Force
+if ((Get-Item $tar).Length -ne (Get-Item $local).Length) { throw "copy to $tar is incomplete" }
+Remove-Item $local
 
 # Copy with LF line endings so bash can run it
 $script = (Get-Content "$PSScriptRoot\update_ledger.sh" -Raw) -replace "`r`n", "`n"
