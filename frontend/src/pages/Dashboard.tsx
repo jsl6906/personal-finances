@@ -4,9 +4,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ACCOUNT_TYPES, get, type AlertEvent, type Balances, type BudgetStatus, type CashflowMonth, type Summary, type TransactionPage } from '../api'
 import { AnomalyList } from '../components/AnomalyList'
 import { CashflowChart, Legend } from '../components/Charts'
+import { BalanceSparkline } from '../components/LineChart'
 import { Button, Card } from '../components/ui'
 import { fullDate, iso, money, moneyRound, monthLabel, shortDate } from '../format'
-import { useAccounts, useAnomalies } from '../hooks'
+import { useAccounts, useAnomalies, useBalanceTrend } from '../hooks'
 import { accountPath, categoryPath, groupPath, txnPath } from '../links'
 
 export function Dashboard() {
@@ -28,6 +29,7 @@ export function Dashboard() {
   const flow = useQuery({ queryKey: ['analytics', 'cashflow', 12], queryFn: () => get<CashflowMonth[]>('/analytics/cashflow', { months: 12 }) })
   const anomalies = useAnomalies()
   const balances = useQuery({ queryKey: ['balances'], queryFn: () => get<Balances>('/balances') })
+  const trend = useBalanceTrend()
   const balanceBy = new Map((balances.data?.accounts ?? []).map((b) => [b.account_id, b]))
   const accountGroups = new Map<string, { a: NonNullable<typeof accounts.data>[number]; bal: number; asOf: string }[]>()
   for (const a of accounts.data ?? []) {
@@ -134,24 +136,28 @@ export function Dashboard() {
           <div className="card-kicker">Accounts</div>
           <div className="card-title">{balances.data?.accounts.length ? `Net worth ${moneyRound(balances.data.net_worth)}` : 'Open accounts'}</div>
           <table className="table">
-            <thead><tr><th>Account</th><th>Institution</th><th className="num">Balance</th></tr></thead>
+            <thead><tr><th>Account</th><th>Institution</th><th className="hide-sm">24 months</th><th className="num">Balance</th></tr></thead>
             {groupedAccounts.map(([type, rows]) => (
               <tbody key={type}>
                 <tr className="group-row">
                   <td colSpan={2}>{type.replace('_', ' ')}</td>
+                  <td className="hide-sm" />
                   <td className="num">{money(rows.reduce((sum, r) => sum + r.bal, 0))}</td>
                 </tr>
                 {rows.map(({ a, bal, asOf }) => (
                   <tr key={a.id}>
                     <td><Link to={accountPath(a.id)}>{a.name}{a.mask ? ` ···${a.mask}` : ''}</Link></td>
                     <td className="text-muted">{a.institution_name ?? '—'}</td>
+                    <td className="hide-sm">
+                      <BalanceSparkline width={64} points={trend.data?.[a.id]} liability={['credit_card', 'loan', 'mortgage'].includes(a.account_type)} />
+                    </td>
                     <td className="num" title={`as of ${fullDate(asOf)}`}>{money(bal)}</td>
                   </tr>
                 ))}
               </tbody>
             ))}
             {groupedAccounts.length === 0 && (
-              <tbody><tr><td colSpan={3} className="text-muted">No accounts with a balance yet.</td></tr></tbody>
+              <tbody><tr><td colSpan={4} className="text-muted">No accounts with a balance yet.</td></tr></tbody>
             )}
           </table>
           <Link to="/sources" className="card-meta">

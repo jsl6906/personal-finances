@@ -188,6 +188,24 @@ async def balance_history(
     return [{"as_of": r.as_of, "balance": float(r.balance)} for r in rows]
 
 
+@router.get("/balances/trend")
+async def balance_trend(days: int = Query(365, ge=30, le=3650), session: AsyncSession = Depends(get_session)):
+    """Last balance per week for every open account, for sparklines."""
+    sql = text(
+        """--sql
+        SELECT DISTINCT ON (b.account_id, date_trunc('week', b.as_of)) b.account_id, b.as_of, b.balance
+        FROM account_balance b
+        JOIN account a ON a.id = b.account_id AND NOT a.is_closed
+        WHERE b.as_of >= :since
+        ORDER BY b.account_id, date_trunc('week', b.as_of), b.as_of DESC, b.created_at DESC
+        """
+    )
+    out: dict[int, list[dict]] = {}
+    for r in await session.execute(sql, {"since": date.today() - timedelta(days=days)}):
+        out.setdefault(r.account_id, []).append({"as_of": r.as_of, "balance": float(r.balance)})
+    return out
+
+
 @router.get("/holdings")
 async def holdings(session: AsyncSession = Depends(get_session)):
     sql = text(

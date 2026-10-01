@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { get, type Account, type Anomaly, type Category, type CategoryGroup, type Institution, type Job, type Member, type Tag } from './api'
+import { get, type Account, type Anomaly, type BalanceTrend, type Category, type CategoryGroup, type Institution, type Job, type Member, type Tag } from './api'
 
 const STALE = 60_000
 
@@ -12,6 +12,8 @@ export const useGroups = () =>
   useQuery({ queryKey: ['category-groups'], queryFn: () => get<CategoryGroup[]>('/category-groups'), staleTime: STALE })
 export const useMembers = () => useQuery({ queryKey: ['members'], queryFn: () => get<Member[]>('/members'), staleTime: STALE })
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => get<Tag[]>('/tags'), staleTime: STALE })
+export const useBalanceTrend = () =>
+  useQuery({ queryKey: ['balances', 'trend'], queryFn: () => get<BalanceTrend>('/balances/trend', { days: 730 }), staleTime: STALE })
 
 export function useAnomalies(status = 'open') {
   return useQuery({ queryKey: ['anomalies', status], queryFn: () => get<Anomaly[]>('/anomalies', { status }) })

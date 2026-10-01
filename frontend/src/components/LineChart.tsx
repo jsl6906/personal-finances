@@ -1,3 +1,5 @@
+import { money, shortDate } from '../format'
+
 type Point = { label: string; value: number | null; title?: string }
 
 /** Minimal blueprint-style line chart (usage over statement periods), matching the design prototype. */
@@ -42,6 +44,30 @@ export function LineChart({ points, height = 180, width = 640, fit = false, form
           )}
         </g>
       ))}
+    </svg>
+  )
+}
+
+/** Inline balance trend for table rows; liabilities are drawn as negative so "up" always means better. */
+export function BalanceSparkline({ points, liability = false, width = 96, height = 24 }: {
+  points: { as_of: string; balance: number }[] | undefined; liability?: boolean; width?: number; height?: number
+}) {
+  if (!points || points.length < 2) return <span className="text-muted small">—</span>
+  const vals = points.map((p) => (liability ? -Math.abs(p.balance) : p.balance))
+  const lo = Math.min(...vals)
+  const hi = Math.max(...vals)
+  const span = hi - lo
+  const x = (i: number) => 2 + (i / (vals.length - 1)) * (width - 4)
+  const y = (v: number) => (span ? height - 3 - ((v - lo) / span) * (height - 6) : height / 2)
+  const line = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  const first = points[0]
+  const last = points[points.length - 1]
+  const title = `${shortDate(first.as_of)} ${money(vals[0])} → ${shortDate(last.as_of)} ${money(vals[vals.length - 1])}`
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={{ display: 'block' }} role="img" aria-label={title}>
+      <title>{title}</title>
+      <polyline points={line} fill="none" stroke="var(--color-accent-700)" strokeWidth="1.25" strokeLinejoin="round" />
+      <circle cx={x(vals.length - 1)} cy={y(vals[vals.length - 1])} r="2" fill="var(--color-accent-700)" />
     </svg>
   )
 }

@@ -237,6 +237,7 @@ export interface BalanceRow {
   balance: number; available: number | null; balance_30d_ago: number | null; source: string
 }
 export interface Balances { accounts: BalanceRow[]; assets: number; liabilities: number; net_worth: number }
+export type BalanceTrend = Record<string, { as_of: string; balance: number }[]>
 export interface HoldingRow {
   account_id: number; account: string; as_of: string; symbol: string | null; description: string | null
   shares: number | null; market_value: number | null; cost_basis: number | null; currency: string | null; source: string

@@ -113,6 +113,8 @@ async def test_tiller_feed_sync(client, no_ai):
 
     bal = (await client.get("/api/balances")).json()
     assert any(a["account"] == "TS Checking" and a["balance"] == 1834.12 for a in bal["accounts"])
+    trend = (await client.get("/api/balances/trend")).json()
+    assert trend[str(acct.id)] == [{"as_of": d.isoformat(), "balance": 1834.12}]
 
 
 async def test_feed_duplicates_against_manual_entries(client, no_ai):

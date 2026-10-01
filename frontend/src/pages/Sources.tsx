@@ -6,8 +6,9 @@ import {
   type Balances, type DataSource, type HoldingRow, type Job, type SourcesInfo,
 } from '../api'
 import { BackfillCard } from '../components/Backfill'
+import { BalanceSparkline } from '../components/LineChart'
 import { Button, Card, ErrorNote } from '../components/ui'
-import { useJob } from '../hooks'
+import { useBalanceTrend, useJob } from '../hooks'
 import { fullDate, money, shortDate } from '../format'
 
 const LIABILITIES = ['credit_card', 'loan', 'mortgage']
@@ -231,6 +232,7 @@ function Evaluation() {
 
 function BalancesCard() {
   const q = useQuery({ queryKey: ['balances'], queryFn: () => get<Balances>('/balances') })
+  const trend = useBalanceTrend()
   const b = q.data
   if (!b || b.accounts.length === 0) return null
   return (
@@ -240,16 +242,20 @@ function BalancesCard() {
         <div className="small text-muted">Assets {money(b.assets)} · Liabilities {money(b.liabilities)}</div>
       </div>
       <div style={{ overflowX: 'auto' }}><table className="table">
-        <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th className="num">Balance</th><th className="num">30-day change</th><th>As of</th><th>Source</th></tr></thead>
+        <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th className="num">Balance</th><th className="hide-sm">Last 24 months</th><th className="num">30-day change</th><th>As of</th><th>Source</th></tr></thead>
         <tbody>
           {b.accounts.map((a) => {
-            const change = a.balance_30d_ago === null ? null : a.balance - a.balance_30d_ago
+            const signed = (v: number) => (LIABILITIES.includes(a.account_type) ? -Math.abs(v) : v)
+            const change = a.balance_30d_ago === null ? null : signed(a.balance) - signed(a.balance_30d_ago)
             return (
               <tr key={a.account_id}>
                 <td>{a.account}</td>
                 <td className="text-muted">{a.institution ?? '—'}</td>
                 <td className="text-muted">{a.account_type.replace('_', ' ')}</td>
-                <td className="num">{money(LIABILITIES.includes(a.account_type) ? -Math.abs(a.balance) : a.balance)}</td>
+                <td className="num">{money(signed(a.balance))}</td>
+                <td className="hide-sm">
+                  <BalanceSparkline points={trend.data?.[a.account_id]} liability={LIABILITIES.includes(a.account_type)} />
+                </td>
                 <td className="num text-muted">{change === null ? '—' : money(change, true)}</td>
                 <td className="nowrap text-muted">{fullDate(a.as_of)}</td>
                 <td className="text-muted">{a.source}</td>
