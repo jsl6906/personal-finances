@@ -210,7 +210,7 @@ export interface BackfillSummary {
 }
 export interface BackfillOverview {
   settings: BackfillSettings; summary: BackfillSummary; google_service_account: string | null
-  inbox_configured: boolean; active_job: { id: number; type: string; message: string | null } | null
+  inbox_configured: boolean; running: boolean; active_job: { id: number; type: string; message: string | null } | null
 }
 export interface BackfillFileRow {
   id: number; path: string; name: string; status: 'pending' | 'classified' | 'done' | 'review' | 'skipped' | 'failed'
