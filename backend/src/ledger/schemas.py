@@ -283,7 +283,19 @@ class BatchSummary(ORM):
     committed_at: datetime | None
 
 
+class BatchSource(BaseModel):
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    uploaded_at: datetime | None = None
+    archive_provider: str | None = None
+    archive_path: str | None = None
+    archive_kind: str | None = None
+    archive_modified_at: datetime | None = None
+
+
 class BatchDetail(BatchSummary):
+    source: BatchSource = BatchSource()
     attachment_id: int | None
     sheet_name: str | None
     sheets: list

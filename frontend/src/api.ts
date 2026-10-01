@@ -205,7 +205,7 @@ export interface BackfillSettings {
 }
 export interface BackfillSummary {
   total: number; processed: number; by_status: Record<string, number>
-  by_kind: Record<string, { total: number; done: number }>
+  by_kind: Record<string, { total: number; done: number; flagged: number; skipped: number; queued: number }>
   transactions_added: number; duplicates_skipped: number; earliest: string | null; latest: string | null
 }
 export interface BackfillOverview {

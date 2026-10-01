@@ -316,12 +316,15 @@ async def process_next(session: AsyncSession) -> dict | None:
 async def summary(session: AsyncSession) -> dict:
     by_status = dict((await session.execute(select(BackfillFile.status, func.count()).group_by(BackfillFile.status))).all())
     by_kind = {
-        k or "unclassified": {"total": total, "done": done}
-        for k, total, done in await session.execute(
+        k or "unclassified": {"total": total, "done": done, "flagged": flagged, "skipped": skipped, "queued": queued}
+        for k, total, done, flagged, skipped, queued in await session.execute(
             select(
                 BackfillFile.kind,
                 func.count(),
                 func.count().filter(BackfillFile.status == "done"),
+                func.count().filter(BackfillFile.status.in_(("review", "failed"))),
+                func.count().filter(BackfillFile.status == "skipped"),
+                func.count().filter(BackfillFile.status.in_(("pending", "classified"))),
             ).group_by(BackfillFile.kind)
         )
     }

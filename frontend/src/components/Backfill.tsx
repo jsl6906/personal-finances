@@ -87,14 +87,31 @@ export function BackfillCard() {
       {s && s.total > 0 && (
         <>
           <ProgressBar fraction={s.processed / s.total} />
+          <div className="small text-muted">
+            {[
+              ['imported', s.by_status.done],
+              ['skipped', s.by_status.skipped],
+              ['flagged', (s.by_status.review ?? 0) + (s.by_status.failed ?? 0)],
+              ['queued', (s.by_status.pending ?? 0) + (s.by_status.classified ?? 0)],
+            ].map(([k, n]) => `${(n ?? 0).toLocaleString()} ${k}`).join(' · ')}
+          </div>
           {running && d?.active_job?.message && <div className="small text-muted">Working: {d.active_job.message}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 'var(--space-3)', fontSize: 13 }}>
             {GROUPS.map(([label, kinds]) => {
-              const total = kinds.reduce((n, k) => n + (s.by_kind[k]?.total ?? 0), 0)
-              const done = kinds.reduce((n, k) => n + (s.by_kind[k]?.done ?? 0), 0)
-              return <Stat key={label} label={label} value={`${done.toLocaleString()} / ${total.toLocaleString()}`} />
+              const sum = (f: 'total' | 'done' | 'flagged' | 'skipped' | 'queued') =>
+                kinds.reduce((n, k) => n + (s.by_kind[k]?.[f] ?? 0), 0)
+              if (!sum('total')) return null
+              const hint = ([['flagged', sum('flagged')], ['skipped', sum('skipped')], ['queued', sum('queued')]] as const)
+                .filter(([, n]) => n > 0).map(([k, n]) => `${n.toLocaleString()} ${k}`).join(' · ')
+              return (
+                <Stat key={label} label={`${label} imported`} value={`${sum('done').toLocaleString()} / ${sum('total').toLocaleString()}`} hint={hint} />
+              )
             })}
-            <Stat label="Waiting to classify" value={(s.by_status.pending ?? 0).toLocaleString()} />
+            <Stat
+              label="Queued"
+              value={((s.by_status.pending ?? 0) + (s.by_status.classified ?? 0)).toLocaleString()}
+              hint={s.by_status.pending ? `${s.by_status.pending.toLocaleString()} still to classify` : undefined}
+            />
             <Stat label="Transactions added" value={s.transactions_added.toLocaleString()} />
             <Stat label="Duplicates auto-resolved" value={s.duplicates_skipped.toLocaleString()} />
           </div>
@@ -128,8 +145,14 @@ export function BackfillCard() {
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return <div><div className="text-muted" style={{ fontSize: 11 }}>{label}</div><div>{value}</div></div>
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <div className="text-muted" style={{ fontSize: 11 }}>{label}</div>
+      <div>{value}</div>
+      {hint && <div className="text-muted" style={{ fontSize: 11 }}>{hint}</div>}
+    </div>
+  )
 }
 
 function FileActions({ f, onAction }: { f: BackfillFileRow; onAction: (action: string, kind?: string) => void }) {
