@@ -74,6 +74,7 @@ export interface Transaction {
   merchant: string | null; merchant_name: string | null; merchant_source: 'user' | null; amount: string; account_id: number | null; account_name: string | null
   institution_name: string | null; category_id: number | null; category_name: string | null
   category_group_id: number | null; category_group_name: string | null; category_type: CategoryType | null; category_source: string | null
+  category_rule_id: number | null; category_rule: string | null
   suggested_category_id: number | null; suggested_category_name: string | null
   suggestion_confidence: string | null; suggestion_reason: string | null
   member_id: number | null; member_initials: string | null; notes: string | null; check_number: string | null
@@ -328,13 +329,13 @@ export interface Cadence { label: string; days: number; next_date: string; typic
 export interface BudgetInfo { id: number; amount: number; period_type: PeriodType; monthly: number }
 interface EntityDetail { start: string; end: string; stats: EntityStats; monthly: EntityMonth[]; yearly: EntityYear[] }
 interface CategoryLinks {
-  bill_series: { id: number; name: string }[]; spread_rules: { id: number; name: string; months: number }[]; merchant_rules: number
+  bill_series: { id: number; name: string }[]; spread_rules: { id: number; name: string; months: number }[]; category_rules: number
 }
 export interface MerchantDetail extends EntityDetail {
   key: string; name: string; display_name: string | null; aliases: string[]; overridden: number
   descriptions: { description: string; count: number; last_date: string }[]
   latest_description: string; charges: Charge[]; cadence: Cadence | null; categories: BreakdownRow[]; accounts: BreakdownRow[]
-  rule: { category_id: number; category_name: string; source: string; hits: number } | null
+  rule: { id: number; category_id: number; category_name: string; source: string } | null
 }
 export interface AccountDetail extends EntityDetail {
   account: {
@@ -395,6 +396,26 @@ export interface SpreadRule {
   min_amount: string | null; months: number; is_active: boolean; matches_12m: number; total_12m: string
 }
 export interface BudgetSuggestion { category_id: number; name: string; group: string; monthly_average: number; suggested: number }
+
+// ---- category rules ----
+export type RuleMatch = 'merchant' | 'contains' | 'regex'
+export interface RuleSpec {
+  match_type: RuleMatch; pattern: string; category_id: number; account_id: number | null
+  amount_min: string | null; amount_max: string | null
+}
+export interface CategoryRule extends RuleSpec {
+  id: number; category_name: string; category_group_name: string; account_name: string | null
+  priority: number; is_active: boolean; source: 'user' | 'learned' | 'ai'; note: string | null
+  description: string; applied_count: number; created_at: string; updated_at: string
+}
+export interface RulePreview {
+  matches: number; uncategorized: number; same: number; auto: number; user: number
+  samples: {
+    id: number; txn_date: string; description: string; amount: string; account_name: string | null
+    category_name: string | null; category_source: string | null
+  }[]
+}
+export interface CategoryAlias { id: number; alias: string; category_id: number; category_name: string }
 
 // ---- statements ----
 export interface Usage { id?: number; metric: string; value: string; unit: string | null; is_primary: boolean }

@@ -12,9 +12,11 @@ async def tm(client):
 
     a = await add("TM COFFEE #123 SPRINGFIELD IL")
     b = await add("TM COFFEE SHOP 99999", d="2025-02-03")
-    # Category chosen on the source merchant creates a learned rule that should follow the merge.
+    # A rule on the source merchant should follow the merge.
     r = await client.patch(f"/api/transactions/{b['id']}", json={"category_id": cat["id"]})
     assert r.status_code == 200
+    r = await client.post("/api/rules", json={"pattern": "tm coffee shop", "category_id": cat["id"]})
+    assert r.status_code == 201, r.text
     return {"a": a, "b": b, "cat": cat, "add": add}
 
 

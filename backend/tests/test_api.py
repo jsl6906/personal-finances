@@ -65,8 +65,16 @@ async def test_transaction_crud_and_rule_learning(client, refs):
     assert r.status_code == 200, r.text
     assert r.json()["category_name"] == "Groceries"
     assert r.json()["category_source"] == "user"
+    # Editing a category no longer learns a rule silently.
+    assert (await client.get(f"/api/rules/for-transaction/{t['id']}")).json() == []
+    rule = await client.post(
+        "/api/rules", json={"match_type": "merchant", "pattern": "Kroger Springfield", "category_id": groceries}
+    )
+    assert rule.status_code == 201, rule.text
+    rule = rule.json()
+    assert rule["pattern"] == "kroger springfield" and rule["source"] == "user"
 
-    # A new transaction from the same merchant (different store #) picks up the learned rule
+    # A new transaction from the same merchant (different store #) picks up the rule
     r = await client.post(
         "/api/transactions",
         json={
@@ -79,6 +87,7 @@ async def test_transaction_crud_and_rule_learning(client, refs):
     t2 = r.json()
     assert t2["category_id"] == groceries
     assert t2["category_source"] == "rule"
+    assert t2["category_rule_id"] == rule["id"] and "kroger springfield" in t2["category_rule"]
 
     page = (await client.get("/api/transactions", params={"q": "kroger", "start": "2026-09-01"})).json()
     assert page["total"] == 2

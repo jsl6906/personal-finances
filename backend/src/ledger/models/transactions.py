@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ledger.db.base import Base, TimestampMixin
-from ledger.models.reference import Account, Category, HouseholdMember, MerchantProfile, Tag
+from ledger.models.reference import Account, Category, CategoryRule, HouseholdMember, MerchantProfile, Tag
 
 SOURCE_TYPES = ("manual", "spreadsheet", "document", "tiller", "simplefin", "backfill")
 
@@ -53,6 +53,10 @@ class Transaction(TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     category_id: Mapped[int | None] = mapped_column(ForeignKey("category.id", ondelete="SET NULL"), index=True)
     category_source: Mapped[str | None] = mapped_column(String(20))
+    # The rule that set category_id (category_source='rule').
+    category_rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("category_rule.id", ondelete="SET NULL"), index=True
+    )
     suggested_category_id: Mapped[int | None] = mapped_column(ForeignKey("category.id", ondelete="SET NULL"))
     suggestion_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
     suggestion_reason: Mapped[str | None] = mapped_column(Text)
@@ -75,6 +79,7 @@ class Transaction(TimestampMixin, Base):
     account: Mapped[Account | None] = relationship(lazy="joined")
     category: Mapped[Category | None] = relationship(foreign_keys=[category_id], lazy="joined")
     suggested_category: Mapped[Category | None] = relationship(foreign_keys=[suggested_category_id], lazy="joined")
+    category_rule: Mapped[CategoryRule | None] = relationship(lazy="joined")
     member: Mapped[HouseholdMember | None] = relationship(lazy="joined")
     tags: Mapped[list[Tag]] = relationship(secondary=transaction_tag, lazy="selectin", order_by=Tag.name)
     merchant_profile: Mapped[MerchantProfile | None] = relationship(

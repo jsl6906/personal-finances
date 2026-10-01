@@ -32,9 +32,14 @@ EXPORTS = {
     "statement_usage.csv": "SELECT * FROM v_statement_usage ORDER BY series, period_start",
     "balances.csv": "SELECT * FROM v_balances ORDER BY account, as_of",
     "holdings.csv": "SELECT * FROM v_holdings ORDER BY account, as_of",
-    "merchant_rules.csv": """--sql
-        SELECT r.merchant, c.name AS category, r.source, r.hits
-        FROM merchant_rule r JOIN category c ON c.id = r.category_id""",
+    "category_rules.csv": """--sql
+        SELECT r.id, r.match_type, r.pattern, c.name AS category, a.name AS account, r.amount_min, r.amount_max,
+               r.priority, r.is_active, r.source, r.note
+        FROM category_rule r JOIN category c ON c.id = r.category_id LEFT JOIN account a ON a.id = r.account_id
+        ORDER BY r.priority, r.id DESC""",
+    "category_aliases.csv": """--sql
+        SELECT al.alias, c.name AS category FROM category_alias al JOIN category c ON c.id = al.category_id
+        ORDER BY al.alias""",
     "spread_rules.csv": "SELECT name, merchant_pattern, min_amount, months, is_active FROM spread_rule",
 }
 

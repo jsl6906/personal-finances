@@ -15,10 +15,10 @@ from ledger.models.reference import (
     Account,
     Category,
     CategoryGroup,
+    CategoryRule,
     HouseholdMember,
     Institution,
     MerchantProfile,
-    MerchantRule,
     Tag,
 )
 from ledger.models.sources import AccountBalance, Holding, Source
@@ -41,6 +41,7 @@ __all__ = [
     "Category",
     "CategoryAlias",
     "CategoryGroup",
+    "CategoryRule",
     "ChatMessage",
     "ChatSession",
     "DuplicatePair",
@@ -52,7 +53,6 @@ __all__ = [
     "Institution",
     "Job",
     "MerchantProfile",
-    "MerchantRule",
     "Source",
     "SpreadRule",
     "Statement",

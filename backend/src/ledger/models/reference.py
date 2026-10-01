@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from decimal import Decimal
+
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -86,16 +88,31 @@ class Tag(TimestampMixin, Base):
     color: Mapped[str | None] = mapped_column(String(20))
 
 
-class MerchantRule(TimestampMixin, Base):
-    """Learned or user-defined mapping from a normalized merchant to a category."""
+RULE_MATCH_TYPES = ("merchant", "contains", "regex")
+RULE_SOURCES = ("user", "learned", "ai")
 
-    __tablename__ = "merchant_rule"
-    __table_args__ = (UniqueConstraint("merchant"),)
+
+class CategoryRule(TimestampMixin, Base):
+    """Auto-categorization: the first active match (priority, then newest) categorizes an uncategorized transaction.
+
+    match_type: merchant = exact merchant key; contains = case-insensitive substring of the description;
+    regex = case-insensitive Postgres regex on the description. Account and |amount| range narrow the match.
+    """
+
+    __tablename__ = "category_rule"
+    __table_args__ = (Index("ix_category_rule_match", "match_type", "pattern"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    merchant: Mapped[str] = mapped_column(String(200))
-    category_id: Mapped[int] = mapped_column(ForeignKey("category.id", ondelete="CASCADE"))
-    source: Mapped[str] = mapped_column(String(20), default="learned")
-    hits: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    match_type: Mapped[str] = mapped_column(String(20), default="merchant", server_default="merchant")
+    pattern: Mapped[str] = mapped_column(String(300))
+    category_id: Mapped[int] = mapped_column(ForeignKey("category.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("account.id", ondelete="CASCADE"))
+    amount_min: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    amount_max: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    priority: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    source: Mapped[str] = mapped_column(String(20), default="user", server_default="user")
+    note: Mapped[str | None] = mapped_column(Text)
+
 
 
 class MerchantProfile(TimestampMixin, Base):

@@ -140,6 +140,8 @@ class TransactionOut(TransactionBase):
     category_group_name: str | None
     category_type: str | None
     category_source: str | None
+    category_rule_id: int | None = None
+    category_rule: str | None = None
     suggested_category_id: int | None
     suggested_category_name: str | None
     suggestion_confidence: Decimal | None

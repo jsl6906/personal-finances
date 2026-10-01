@@ -57,7 +57,8 @@ function MerchantView({ merchant: key }: { merchant: string }) {
           <h2>{d.name}</h2>
           <div className="text-muted subtitle">
             “{d.latest_description}” · {s.count.toLocaleString()} transactions · first {fullDate(s.first_date)} · last {fullDate(s.last_date)}
-            {d.rule && <> · auto-categorized as <Link to={categoryPath(d.rule.category_id)}>{d.rule.category_name}</Link></>}
+            {d.rule && <> · auto-categorized as <Link to={categoryPath(d.rule.category_id)}>{d.rule.category_name}</Link>
+              {' '}(<Link to={`/rules?id=${d.rule.id}`}>rule</Link>)</>}
           </div>
           {d.key !== key && <div className="small muted-2">“{key}” is merged into this merchant.</div>}
         </div>

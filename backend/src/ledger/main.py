@@ -25,6 +25,7 @@ from ledger.api import (
     imports,
     misc,
     reference,
+    rules,
     sources,
     statements,
     system,
@@ -73,6 +74,7 @@ app.include_router(system.router, prefix="/api", dependencies=protected)
 app.include_router(misc.router, prefix="/api", dependencies=protected)
 app.include_router(reference.router, prefix="/api", dependencies=protected)
 app.include_router(transactions.router, prefix="/api", dependencies=protected)
+app.include_router(rules.router, prefix="/api", dependencies=protected)
 app.include_router(imports.router, prefix="/api", dependencies=protected)
 app.include_router(duplicates.router, prefix="/api", dependencies=protected)
 app.include_router(statements.router, prefix="/api", dependencies=protected)

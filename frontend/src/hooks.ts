@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { get, type Account, type Anomaly, type BalanceTrend, type Category, type CategoryGroup, type Institution, type Job, type Member, type Tag } from './api'
+import { get, type Account, type Anomaly, type BalanceTrend, type Category, type CategoryGroup, type Institution, type Job, type Member, type MerchantHit, type Tag } from './api'
 
 const STALE = 60_000
 
@@ -14,6 +15,25 @@ export const useMembers = () => useQuery({ queryKey: ['members'], queryFn: () =>
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => get<Tag[]>('/tags'), staleTime: STALE })
 export const useBalanceTrend = () =>
   useQuery({ queryKey: ['balances', 'trend'], queryFn: () => get<BalanceTrend>('/balances/trend', { days: 730 }), staleTime: STALE })
+
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), ms)
+    return () => clearTimeout(id)
+  }, [value, ms])
+  return v
+}
+
+export function useMerchantSearch(q: string) {
+  const debounced = useDebounced(q.trim(), 250)
+  return useQuery({
+    queryKey: ['merchants', 'search', debounced],
+    queryFn: () => get<MerchantHit[]>('/merchants/search', { q: debounced, limit: 12 }),
+    enabled: debounced.length >= 2,
+    staleTime: 30_000,
+  })
+}
 
 export function useAnomalies(status = 'open') {
   return useQuery({ queryKey: ['anomalies', status], queryFn: () => get<Anomaly[]>('/anomalies', { status, limit: 500 }) })

@@ -67,7 +67,7 @@ function CategoryView({ id }: { id: number }) {
         <Breakdown kicker="Accounts" rows={d.accounts} to={breakdownPath.account} value={value} />
       </div>
 
-      <RelatedSetup d={d} />
+      <RelatedSetup d={d} categoryId={id} />
       <YearTable rows={d.yearly} show={c.type === 'income' ? ['received', 'spent', 'net'] : ['spent', 'received', 'net']} />
       <Findings params={{ category_id: id }} />
       <TxnList params={{ category_id: id, start: r.start }} month={r.month} onClearMonth={r.clearMonth} hide={['category']} />
@@ -75,8 +75,8 @@ function CategoryView({ id }: { id: number }) {
   )
 }
 
-export function RelatedSetup({ d }: { d: Pick<CategoryDetail, 'bill_series' | 'spread_rules' | 'merchant_rules'> }) {
-  if (!d.bill_series.length && !d.spread_rules.length && !d.merchant_rules) return null
+export function RelatedSetup({ d, categoryId }: { d: Pick<CategoryDetail, 'bill_series' | 'spread_rules' | 'category_rules'>; categoryId?: number }) {
+  if (!d.bill_series.length && !d.spread_rules.length && !d.category_rules) return null
   return (
     <Card style={{ gap: 'var(--space-2)' }}>
       <div className="card-kicker">Related setup</div>
@@ -87,7 +87,12 @@ export function RelatedSetup({ d }: { d: Pick<CategoryDetail, 'bill_series' | 's
         {d.spread_rules.length > 0 && (
           <div>Budget spreading: {d.spread_rules.map((s) => `${s.name} (${s.months} mo)`).join(', ')} · <Link to="/budgets">manage</Link></div>
         )}
-        {d.merchant_rules > 0 && <div>{d.merchant_rules} merchant rule{d.merchant_rules === 1 ? '' : 's'} auto-assign this category</div>}
+        {d.category_rules > 0 && (
+          <div>
+            {d.category_rules} categorization rule{d.category_rules === 1 ? '' : 's'} assign{d.category_rules === 1 ? 's' : ''} this category
+            {' · '}<Link to={categoryId ? `/rules?category=${categoryId}` : '/rules'}>review</Link>
+          </div>
+        )}
       </div>
     </Card>
   )

@@ -187,8 +187,14 @@ async def run(apply: bool) -> None:
             for canon, (_, _, _, dest) in MERCHANTS.items():
                 await q(
                     s,
-                    "INSERT INTO merchant_rule (merchant, category_id, source, hits) VALUES (:m, :c, 'user', 1) "
-                    "ON CONFLICT (merchant) DO UPDATE SET category_id = EXCLUDED.category_id, source = 'user'",
+                    "DELETE FROM category_rule WHERE match_type = 'merchant' AND pattern = :m AND account_id IS NULL "
+                    "AND amount_min IS NULL AND amount_max IS NULL",
+                    m=canon,
+                )
+                await q(
+                    s,
+                    "INSERT INTO category_rule (match_type, pattern, category_id, source) "
+                    "VALUES ('merchant', :m, :c, 'user')",
                     m=canon,
                     c=cats[dest],
                 )

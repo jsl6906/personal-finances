@@ -351,7 +351,7 @@ function Wizard({ b }: { b: BatchDetail }) {
               <div className="card-kicker">Category suggestions</div>
               <div className="card-body">
                 Categories in the file are matched to your hierarchy by name. Rows that stay uncategorized first get your
-                learned merchant rules, then Gemini proposes a category; suggestions can be bulk-accepted on the
+                {' '}<Link to="/rules">categorization rules</Link>, then Gemini proposes a category; suggestions can be bulk-accepted on the
                 Transactions screen.
               </div>
             </Card>

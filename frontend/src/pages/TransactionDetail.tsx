@@ -1,14 +1,18 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { del, get, patch, post, upload, type Statement, type Transaction, type TxnNote, type TxnPair, type TxnSource } from '../api'
+import {
+  del, get, patch, post, upload, type CategoryRule, type Statement, type Transaction, type TxnNote, type TxnPair, type TxnSource,
+} from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { MerchantInput } from '../components/MerchantInput'
+import { RuleEditor } from '../components/RuleEditor'
 import { Button, Card, ErrorNote, Field, Icon } from '../components/ui'
 import { fullDate, iso, money, monthName, parseIso, shortDate } from '../format'
 import { useAccounts, useMembers, useTags } from '../hooks'
 import { accountPath, categoryPath, merchantKey, merchantPath, txnPath } from '../links'
 import { ORIGINS } from '../review'
+import { ruleDraft } from '../rules'
 
 type Draft = {
   txn_date: string
@@ -75,6 +79,87 @@ function SourceRow({ s, txn }: { s: TxnSource; txn: Transaction }) {
   )
 }
 
+const PROVENANCE: Record<string, string> = {
+  user: 'Set by you',
+  import: 'From the imported file',
+  source: 'From the bank feed',
+  ai: 'Accepted AI suggestion',
+  statement: 'From its bill series',
+}
+
+function CategoryProvenance({ txn, onCreateRule }: { txn: Transaction; onCreateRule: () => void }) {
+  if (!txn.category_id) return null
+  let label: ReactNode = PROVENANCE[txn.category_source ?? ''] ?? null
+  if (txn.category_source === 'rule') {
+    label = txn.category_rule_id
+      ? <>Set by rule <Link to={`/rules?id=${txn.category_rule_id}`}>{txn.category_rule}</Link></>
+      : 'Set by a rule (since deleted)'
+  }
+  return (
+    <div className="small muted-2">
+      {label}{label && ' · '}
+      <button type="button" className="link-btn" onClick={onCreateRule}>Make a rule…</button>
+    </div>
+  )
+}
+
+type PromptState = { categoryId: number } | { done: string }
+// Parents key the detail by updated_at, so a save remounts it; keep the rule prompt outside component state.
+const prompts = new Map<number, PromptState>()
+
+function usePrompt(txnId: number | undefined) {
+  const [state, setState] = useState<PromptState | null>(() => (txnId !== undefined ? prompts.get(txnId) ?? null : null))
+  const set = (s: PromptState | null) => {
+    if (txnId !== undefined) {
+      if (s) prompts.set(txnId, s)
+      else prompts.delete(txnId)
+    }
+    setState(s)
+  }
+  return [state, set] as const
+}
+
+export function RulePrompt({ txn, categoryId, onDone, onClose }: {
+  txn: Transaction; categoryId: number; onDone: (msg: string) => void; onClose: () => void
+}) {
+  const others = useQuery({
+    queryKey: ['rules', 'for', txn.id],
+    queryFn: () => get<CategoryRule[]>(`/rules/for-transaction/${txn.id}`),
+  })
+  const pattern = txn.merchant ?? txn.description
+  const conflicts = (others.data ?? []).filter((r) => r.is_active && r.category_id !== categoryId)
+  const same = (others.data ?? []).find((r) => r.match_type === 'merchant' && r.pattern === txn.merchant && !r.account_id
+    && r.amount_min === null && r.amount_max === null)
+  return (
+    <div className="callout" style={{ color: 'inherit' }}>
+      <RuleEditor compact
+        initial={ruleDraft({ match_type: txn.merchant ? 'merchant' : 'contains', pattern, category_id: categoryId })}
+        seedAccount={txn.account_id && txn.account_name ? { id: txn.account_id, name: txn.account_name } : null}
+        intro={
+          <>
+            <strong>Categorize similar transactions the same way?</strong>
+            <div className="small">
+              Changing a category by hand only affects what you changed. A rule also categorizes future imports, and can fix
+              existing transactions now.
+            </div>
+            {conflicts.length > 0 && (
+              <div className="small">
+                Rules already matching this transaction: {conflicts.map((r, i) => (
+                  <span key={r.id}>{i > 0 && '; '}<Link to={`/rules?id=${r.id}`}>{r.description}</Link> → {r.category_name}</span>
+                ))}.{same ? ' Saving updates that merchant rule.' : ' A new rule takes precedence over equal-priority older ones.'}
+              </div>
+            )}
+          </>
+        }
+        saveLabel={same ? 'Update rule' : 'Create rule'}
+        cancelLabel="Not now"
+        onDone={onDone}
+        onCancel={onClose}
+      />
+    </div>
+  )
+}
+
 function NotesSection({ txnId }: { txnId: number }) {
   const qc = useQueryClient()
   const key = ['transactions', 'notes', txnId]
@@ -136,6 +221,7 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
   const members = useMembers()
   const tags = useTags()
   const [draft, setDraft] = useState<Draft>(() => toDraft(txn, { account_id: defaultAccountId ?? null }))
+  const [rulePrompt, setRulePrompt] = usePrompt(txn?.id)
   const isNew = txn === null
   const dups = useQuery({
     queryKey: ['duplicates', 'for', txn?.id],
@@ -167,13 +253,13 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
   }
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: (d: Draft) => {
       const body: Record<string, unknown> = {
-        ...draft,
-        notes: draft.notes || null,
-        check_number: draft.check_number || null,
-        merchant_name: draft.merchant_name.trim() || null,
-        amount: Number(draft.amount).toFixed(2),
+        ...d,
+        notes: d.notes || null,
+        check_number: d.check_number || null,
+        merchant_name: d.merchant_name.trim() || null,
+        amount: Number(d.amount).toFixed(2),
       }
       if (isNew) return post<Transaction>('/transactions', body)
       const orig = toDraft(txn, {})
@@ -209,6 +295,14 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
   const amountNum = Number(draft.amount || 0)
   const spread = draft.budget_spread_months !== null && draft.budget_spread_months > 1
   const valid = draft.description.trim() && draft.amount !== '' && !Number.isNaN(amountNum) && draft.txn_date
+  const pickCategory = (v: number | null) => {
+    const next = { ...draft, category_id: v }
+    setDraft(next)
+    if (!isNew && valid && v !== draft.category_id) {
+      setRulePrompt(null)
+      save.mutate(next, { onSuccess: () => { if (v !== null) setRulePrompt({ categoryId: v }) } })
+    }
+  }
 
   return (
     <Card as="aside" className="detail">
@@ -260,8 +354,21 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
           placeholder={txn && txn.merchant_source !== 'user' && txn.merchant_name ? `${txn.merchant_name} (automatic)` : 'Automatic from description'} />
       </Field>
       <Field label="Category">
-        <CategorySelect value={draft.category_id} onChange={(v) => set('category_id', v)} />
+        <CategorySelect value={draft.category_id} onChange={pickCategory} />
       </Field>
+      {!isNew && rulePrompt === null && draft.category_id === txn.category_id && (
+        <CategoryProvenance txn={txn} onCreateRule={() => txn.category_id && setRulePrompt({ categoryId: txn.category_id })} />
+      )}
+      {!isNew && rulePrompt && 'categoryId' in rulePrompt && (
+        <RulePrompt key={rulePrompt.categoryId} txn={txn} categoryId={rulePrompt.categoryId}
+          onDone={(msg) => setRulePrompt({ done: msg })} onClose={() => setRulePrompt(null)} />
+      )}
+      {!isNew && rulePrompt && 'done' in rulePrompt && (
+        <div className="callout row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+          <span style={{ flex: 1 }}>{rulePrompt.done}</span>
+          <button className="btn btn-ghost btn-icon" onClick={() => setRulePrompt(null)} aria-label="Dismiss">×</button>
+        </div>
+      )}
       <Field label="Account">
         <select className="input" value={draft.account_id ?? ''}
           onChange={(e) => set('account_id', e.target.value ? Number(e.target.value) : null)}>
@@ -380,8 +487,8 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
 
       <ErrorNote error={save.error || remove.error || accept.error} />
       <div className="row">
-        <Button variant="primary" onClick={() => save.mutate()} disabled={!valid || save.isPending}>
-          {isNew ? 'Add transaction' : 'Save'}
+        <Button variant="primary" onClick={() => save.mutate(draft)} disabled={!valid || save.isPending}>
+          {isNew ? 'Add transaction' : save.isPending ? 'Saving…' : 'Save'}
         </Button>
         {!isNew && (
           <Button variant="ghost" onClick={() => confirm('Delete this transaction?') && remove.mutate()} disabled={remove.isPending}>

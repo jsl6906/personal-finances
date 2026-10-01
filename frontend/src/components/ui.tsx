@@ -72,6 +72,7 @@ const ICONS: Record<string, string> = {
   reports: 'M3 3v18h18M7 15l4-4 3 3 5-6',
   findings: 'M4 22V4M4 4h13l-2.5 4.5L17 13H4',
   transactions: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  rules: 'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
   import: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   bills: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8',
   budgets: 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zM12 6a6 6 0 1 0 0 12 6 6 0 1 0 0-12zM12 10a2 2 0 1 0 0 4 2 2 0 1 0 0-4z',

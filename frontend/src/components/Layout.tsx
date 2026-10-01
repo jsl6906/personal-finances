@@ -10,6 +10,7 @@ const NAV = [
   { to: '/reports', icon: 'reports', label: 'Reports' },
   { to: '/findings', icon: 'findings', label: 'Findings' },
   { to: '/transactions', icon: 'transactions', label: 'Transactions' },
+  { to: '/rules', icon: 'rules', label: 'Category rules' },
   { to: '/import', icon: 'import', label: 'Import' },
   { to: '/bills', icon: 'bills', label: 'Bills & statements' },
   { to: '/budgets', icon: 'budgets', label: 'Budgets' },

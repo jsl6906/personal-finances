@@ -85,6 +85,7 @@ async def decide(pair_id: int, body: PairDecisionIn, session: AsyncSession = Dep
         # Carry over anything the removed copy knew that the survivor doesn't.
         if keep.category_id is None and drop.category_id is not None:
             keep.category_id, keep.category_source = drop.category_id, drop.category_source
+            keep.category_rule_id = drop.category_rule_id
         if drop.notes and drop.notes not in (keep.notes or ""):
             keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
         keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())

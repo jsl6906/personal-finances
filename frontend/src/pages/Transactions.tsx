@@ -5,32 +5,24 @@ import { get, post, type Job, type Transaction, type TransactionPage } from '../
 import { CategorySelect } from '../components/CategorySelect'
 import { Button, Card, ErrorNote, ProgressBar, Seg } from '../components/ui'
 import { money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
-import { useAccounts, useJob } from '../hooks'
+import { useAccounts, useDebounced, useJob } from '../hooks'
 import { accountPath, categoryPath } from '../links'
-import { TransactionDetail } from './TransactionDetail'
+import { TransactionDetail, RulePrompt } from './TransactionDetail'
 
 type Status = 'all' | 'uncategorized' | 'suggested' | 'with_statement'
 const PAGE = 100
-
-function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms)
-    return () => clearTimeout(id)
-  }, [value, ms])
-  return v
-}
 
 export function Transactions() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const batchId = searchParams.get('batch') ? Number(searchParams.get('batch')) : null
+  const ruleId = searchParams.get('rule') ? Number(searchParams.get('rule')) : null
   const accounts = useAccounts()
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
   const q = useDebounced(search)
   const [status, setStatus] = useState<Status>('all')
-  const [period, setPeriod] = useState<PeriodKey>(batchId || searchParams.get('q') ? 'all' : 'last_90')
+  const [period, setPeriod] = useState<PeriodKey>(batchId || ruleId || searchParams.get('q') ? 'all' : 'last_90')
   const [accountId, setAccountId] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState<number | null>(() =>
     searchParams.get('category') ? Number(searchParams.get('category')) : null)
@@ -39,11 +31,12 @@ export function Transactions() {
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [bulkCategory, setBulkCategory] = useState<number | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
+  const [bulkPrompt, setBulkPrompt] = useState<{ txn: Transaction; categoryId: number } | { done: string } | null>(null)
 
   const range = periodRange(period)
   const params = {
     q, status, ...range, account_id: accountId ?? undefined, category_id: categoryId ?? undefined, limit: PAGE, offset,
-    import_batch_id: batchId ?? undefined,
+    import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
   }
   const resetPage = () => {
     setOffset(0)
@@ -113,6 +106,13 @@ export function Transactions() {
   const suggestedIds = items.filter((t) => t.suggested_category_id && !t.category_id).map((t) => t.id)
   const jobRunning = job.data && ['queued', 'running'].includes(job.data.status)
   const total = list.data?.total ?? 0
+  const bulkCategorize = (categoryId: number) => {
+    const sel = items.filter((t) => checked.has(t.id))
+    const merchants = new Set(sel.map((t) => t.merchant))
+    const seed = sel.length === checked.size && merchants.size === 1 && sel[0].merchant ? sel[0] : null
+    setBulkPrompt(null)
+    bulk.mutate({ category_id: categoryId }, { onSuccess: () => { if (seed) setBulkPrompt({ txn: seed, categoryId }) } })
+  }
 
   return (
     <section className="page">
@@ -127,7 +127,7 @@ export function Transactions() {
           <input className="input" placeholder="Search description, notes, amount…" style={{ width: 260, maxWidth: '100%' }} value={search}
             onChange={(e) => onFilter(setSearch)(e.target.value)} />
           <Button onClick={() => suggest.mutate()} disabled={suggest.isPending || !!jobRunning}
-            title="Apply merchant rules, then ask Gemini to suggest categories for uncategorized rows">
+            title="Apply categorization rules, then ask Gemini to suggest categories for uncategorized rows">
             {checked.size ? `Suggest categories (${checked.size})` : 'Suggest categories'}
           </Button>
           <Button onClick={() => scan.mutate()} disabled={scan.isPending}>Scan for duplicates</Button>
@@ -155,6 +155,11 @@ export function Transactions() {
             Import #{batchId} ×
           </button>
         )}
+        {ruleId && (
+          <button className="tag tag-outline chip" onClick={() => { setSearchParams({}); resetPage() }}>
+            Categorized by rule #{ruleId} ×
+          </button>
+        )}
       </div>
 
       {job.data && (
@@ -175,7 +180,7 @@ export function Transactions() {
         <div className="bulk-bar">
           <strong>{checked.size} selected</strong>
           <CategorySelect className="input compact" value={bulkCategory} onChange={setBulkCategory} emptyLabel="Set category…" />
-          <Button onClick={() => bulk.mutate({ category_id: bulkCategory })} disabled={!bulkCategory || bulk.isPending}>Apply</Button>
+          <Button onClick={() => bulkCategory && bulkCategorize(bulkCategory)} disabled={!bulkCategory || bulk.isPending}>Apply</Button>
           <Button onClick={() => acceptSel.mutate([...checked])} disabled={acceptSel.isPending}>Accept suggestions</Button>
           <Button variant="ghost" onClick={() => rejectSel.mutate([...checked])}>Reject suggestions</Button>
           <span className="spacer" />
@@ -188,6 +193,16 @@ export function Transactions() {
         <div className="bulk-bar">
           {suggestedIds.length} suggestions on this page
           <Button onClick={() => acceptSel.mutate(suggestedIds)} disabled={acceptSel.isPending}>Accept all on page</Button>
+        </div>
+      )}
+      {bulkPrompt && 'txn' in bulkPrompt && (
+        <RulePrompt key={`${bulkPrompt.txn.id}-${bulkPrompt.categoryId}`} txn={bulkPrompt.txn} categoryId={bulkPrompt.categoryId}
+          onDone={(msg) => setBulkPrompt({ done: msg })} onClose={() => setBulkPrompt(null)} />
+      )}
+      {bulkPrompt && 'done' in bulkPrompt && (
+        <div className="callout row" style={{ flexWrap: 'nowrap' }}>
+          <span style={{ flex: 1 }}>{bulkPrompt.done}</span>
+          <Button variant="ghost" className="small" onClick={() => setBulkPrompt(null)}>Dismiss</Button>
         </div>
       )}
       <ErrorNote error={list.error || suggest.error || bulk.error || acceptSel.error || rejectSel.error || scan.error} />

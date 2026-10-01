@@ -15,8 +15,8 @@ from ledger.models import (
     Budget,
     Category,
     CategoryGroup,
+    CategoryRule,
     MerchantProfile,
-    MerchantRule,
     SpreadRule,
     StatementSeries,
     Transaction,
@@ -127,15 +127,17 @@ async def merchant_detail(
     rows = await entity.charges(session, "merchant", key)
     rule = (
         await session.execute(
-            select(MerchantRule, Category.name).join(Category, Category.id == MerchantRule.category_id).where(
-                MerchantRule.merchant == key
-            )
+            select(CategoryRule, Category.name)
+            .join(Category, Category.id == CategoryRule.category_id)
+            .where(CategoryRule.match_type == "merchant", CategoryRule.pattern == key, CategoryRule.is_active)
+            .order_by(CategoryRule.priority, CategoryRule.id.desc())
+            .limit(1)
         )
     ).first()
     rule_out = None
     if rule:
         r, cat = rule
-        rule_out = {"category_id": r.category_id, "category_name": cat, "source": r.source, "hits": r.hits}
+        rule_out = {"id": r.id, "category_id": r.category_id, "category_name": cat, "source": r.source}
     profile = await session.scalar(select(MerchantProfile).where(MerchantProfile.key == key))
     aliases = (
         await session.scalars(
@@ -326,12 +328,12 @@ async def _series_and_rules(session: AsyncSession, category_ids: list[int]) -> d
         )
     ).all()
     rules = await session.scalar(
-        select(func.count()).select_from(MerchantRule).where(MerchantRule.category_id.in_(category_ids or [0]))
+        select(func.count()).select_from(CategoryRule).where(CategoryRule.category_id.in_(category_ids or [0]))
     )
     return {
         "bill_series": [{"id": i, "name": n} for i, n in series],
         "spread_rules": [{"id": i, "name": n, "months": m} for i, n, m in spread],
-        "merchant_rules": rules or 0,
+        "category_rules": rules or 0,
     }
 
 

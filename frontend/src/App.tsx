@@ -18,6 +18,7 @@ import { Login } from './pages/Login'
 import { MerchantPage } from './pages/MerchantPage'
 import { Placeholder } from './pages/Placeholder'
 import { Reports } from './pages/Reports'
+import { Rules } from './pages/Rules'
 import { Settings } from './pages/Settings'
 import { Sources } from './pages/Sources'
 import { TransactionPage } from './pages/TransactionPage'
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="findings" element={<Findings />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="transactions/:id" element={<TransactionPage />} />
+          <Route path="rules" element={<Rules />} />
           <Route path="merchants" element={<MerchantPage />} />
           <Route path="accounts/:id" element={<AccountPage />} />
           <Route path="categories/:id" element={<CategoryPage />} />

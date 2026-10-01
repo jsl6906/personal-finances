@@ -1,21 +1,7 @@
-import { useEffect, useId, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { get, type MerchantHit } from '../api'
+import { useId, useState } from 'react'
+import { type MerchantHit } from '../api'
 import { shortDate } from '../format'
-
-function useMerchantSearch(q: string) {
-  const [debounced, setDebounced] = useState(q)
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(q.trim()), 250)
-    return () => clearTimeout(id)
-  }, [q])
-  return useQuery({
-    queryKey: ['merchants', 'search', debounced],
-    queryFn: () => get<MerchantHit[]>('/merchants/search', { q: debounced, limit: 12 }),
-    enabled: debounced.length >= 2,
-    staleTime: 30_000,
-  })
-}
+import { useMerchantSearch } from '../hooks'
 
 /** Free-text merchant name with suggestions from existing merchants. */
 export function MerchantInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {

@@ -39,7 +39,7 @@ from ledger.schemas import (
     TxnSourceOut,
 )
 from ledger.services import merchants
-from ledger.services.categorize import learn_rule, rule_category
+from ledger.services.categorize import apply_rules, describe, learn_rule
 from ledger.services.normalize import fingerprint
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -73,6 +73,8 @@ def to_out(t: Transaction) -> TransactionOut:
         category_group_name=t.category.group.name if t.category else None,
         category_type=t.category.type if t.category else None,
         category_source=t.category_source,
+        category_rule_id=t.category_rule_id,
+        category_rule=describe(t.category_rule) if t.category_rule else None,
         suggested_category_id=t.suggested_category_id,
         suggested_category_name=t.suggested_category.name if t.suggested_category else None,
         suggestion_confidence=t.suggestion_confidence,
@@ -133,8 +135,11 @@ def _filtered(
     max_amount: Decimal | None,
     import_batch_id: int | None = None,
     merchant: str | None = None,
+    rule_id: int | None = None,
 ) -> list:
     conds = [Transaction.deleted_at.is_(None)]
+    if rule_id:
+        conds.append(Transaction.category_rule_id == rule_id)
     if import_batch_id:
         # Batches that only matched existing transactions create nothing; include their linked sources.
         conds.append(
@@ -200,6 +205,7 @@ async def list_transactions(
     max_amount: Decimal | None = None,
     import_batch_id: int | None = None,
     merchant: str | None = None,
+    rule_id: int | None = None,
     sort: Literal["date_desc", "date_asc", "amount_desc", "amount_asc", "added_desc"] = "date_desc",
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -207,7 +213,7 @@ async def list_transactions(
 ):
     conds = _filtered(
         q, start, end, account_id, category_id, group_id, member_id, tag_id, status, min_amount, max_amount, import_batch_id,
-        merchant,
+        merchant, rule_id,
     )
     agg = (
         await session.execute(
@@ -308,12 +314,11 @@ async def create_transaction(body: TransactionCreate, session: AsyncSession = De
     t.fingerprint = fingerprint(body.account_id, body.txn_date, body.amount, body.description)
     if body.category_id is not None:
         t.category_source = "user"
-    else:
-        rule = await rule_category(session, t.merchant)
-        if rule:
-            t.category_id, t.category_source = rule, "rule"
     t.tags = await _tags(session, body.tag_ids)
     session.add(t)
+    await session.flush()
+    if body.category_id is None:
+        await apply_rules(session, [t.id])
     await session.commit()
     return to_out(await _load(session, t.id))
 
@@ -345,9 +350,10 @@ async def update_transaction(txn_id: int, body: TransactionUpdate, session: Asyn
     if fields & {"account_id", "txn_date", "amount", "description"}:
         t.fingerprint = fingerprint(t.account_id, t.txn_date, t.amount, t.description)
     if "category_id" in fields:
+        # No rule is learned here; the UI offers to create one explicitly.
         t.category_source = "user" if t.category_id else None
+        t.category_rule_id = None
         t.suggested_category_id = t.suggestion_confidence = t.suggestion_reason = None
-        await learn_rule(session, t.merchant, t.category_id)
     if "tag_ids" in fields and body.tag_ids is not None:
         t.tags = await _tags(session, body.tag_ids)
     await session.commit()
@@ -469,6 +475,7 @@ async def bulk_update(body: BulkUpdate, session: AsyncSession = Depends(get_sess
         values |= {
             "category_id": body.category_id,
             "category_source": "user",
+            "category_rule_id": None,
             "suggested_category_id": None,
             "suggestion_confidence": None,
             "suggestion_reason": None,
@@ -481,10 +488,6 @@ async def bulk_update(body: BulkUpdate, session: AsyncSession = Depends(get_sess
     if values:
         res = await session.execute(update(Transaction).where(live).values(**values))
         updated = res.rowcount
-    if body.category_id is not None:
-        merchants = (await session.scalars(select(Transaction.merchant).where(live).distinct())).all()
-        for m in merchants:
-            await learn_rule(session, m, body.category_id)
     if body.add_tag_ids or body.remove_tag_ids:
         await _tags(session, body.add_tag_ids + body.remove_tag_ids)
         ids = (await session.scalars(select(Transaction.id).where(live))).all()
@@ -532,6 +535,7 @@ async def accept_suggestions(body: IdList, session: AsyncSession = Depends(get_s
             .values(
                 category_id=cat,
                 category_source="ai",
+                category_rule_id=None,
                 suggested_category_id=None,
                 suggestion_confidence=None,
                 suggestion_reason=None,

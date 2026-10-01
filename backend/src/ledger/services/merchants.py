@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.db.filters import id_in
-from ledger.models import MerchantProfile, MerchantRule, Transaction
+from ledger.models import CategoryRule, MerchantProfile, Transaction
 from ledger.services.normalize import normalize_merchant
 
 _USER_NON_WORD = re.compile(r"[^a-z0-9&' ]+")
@@ -109,13 +109,19 @@ async def merge(session: AsyncSession, source: str, target: str) -> int:
     src.alias_of = target
     await session.execute(update(MerchantProfile).where(MerchantProfile.alias_of == source).values(alias_of=target))
     moved = await session.execute(update(Transaction).where(Transaction.merchant == source).values(merchant=target))
-    src_rule = await session.scalar(select(MerchantRule).where(MerchantRule.merchant == source))
-    if src_rule:
-        has_target = await session.scalar(select(MerchantRule.id).where(MerchantRule.merchant == target))
-        if has_target:
-            await session.delete(src_rule)
+    rules = (
+        await session.scalars(
+            select(CategoryRule).where(CategoryRule.match_type == "merchant", CategoryRule.pattern.in_([source, target]))
+        )
+    ).all()
+    taken = {(r.account_id, r.amount_min, r.amount_max) for r in rules if r.pattern == target}
+    for r in rules:
+        if r.pattern != source:
+            continue
+        if (r.account_id, r.amount_min, r.amount_max) in taken:
+            await session.delete(r)
         else:
-            src_rule.merchant = target
+            r.pattern = target
     return moved.rowcount or 0
 
 
