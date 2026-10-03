@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from pydantic import BaseModel
-from sqlalchemy import delete, select, text
+from sqlalchemy import case, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -267,13 +267,19 @@ async def detect(session: AsyncSession, month: date) -> dict:
         await session.execute(
             stmt.on_conflict_do_update(
                 index_elements=[Anomaly.subject_key],
-                set_={k: stmt.excluded[k] for k in ("amount", "baseline", "score", "title", "detail")},
+                set_={
+                    **{k: stmt.excluded[k] for k in ("amount", "baseline", "score", "title", "detail")},
+                    "status": case((Anomaly.status == "withdrawn", "open"), else_=Anomaly.status),
+                },
             )
         )
     keys = [a["subject_key"] for a in found]
-    # Open findings that no longer hold (e.g. re-categorized, deleted) are withdrawn.
+    # Open findings that no longer hold (e.g. re-categorized, deleted) are withdrawn, not deleted, so emailed
+    # alerts keep pointing at them and a re-detection reuses the same finding instead of alerting again.
     stale = await session.execute(
-        delete(Anomaly).where(Anomaly.period == month, Anomaly.status == "open", Anomaly.subject_key.not_in(keys or [""]))
+        update(Anomaly)
+        .where(Anomaly.period == month, Anomaly.status == "open", Anomaly.subject_key.not_in(keys or [""]))
+        .values(status="withdrawn")
     )
     await session.commit()
     return {"month": month.isoformat(), "found": len(found), "withdrawn": stale.rowcount or 0}

@@ -71,11 +71,27 @@ async def test_detect_anomalies(client, data):
     again = [a for a in (await client.get("/api/anomalies")).json() if a["period"] == "2024-06-01"]
     assert len(again) == len(found) - 1
 
-    # A finding that no longer holds is withdrawn
+    # A finding that no longer holds is withdrawn (kept, so alerts already sent still resolve)
     await client.delete(f"/api/transactions/{data['jewel']['id']}")
     async with get_sessionmaker()() as session:
         res = await detect(session, date(2024, 6, 1))
     assert res["withdrawn"] == 1
+    withdrawn = (await client.get("/api/anomalies", params={"status": "withdrawn"})).json()
+    assert [a["id"] for a in withdrawn if a["period"] == "2024-06-01"] == [kinds["large_transaction"]["id"]]
+
+    # It reopens as the same finding if it holds again
+    from ledger.models import Transaction
+
+    async with get_sessionmaker()() as session:
+        (await session.get(Transaction, data["jewel"]["id"])).deleted_at = None
+        await session.commit()
+        await detect(session, date(2024, 6, 1))
+    reopened = (await client.get("/api/anomalies", params={"transaction_id": data["jewel"]["id"]})).json()
+    assert [a["id"] for a in reopened] == [kinds["large_transaction"]["id"]]
+
+    await client.delete(f"/api/transactions/{data['jewel']['id']}")
+    async with get_sessionmaker()() as session:
+        await detect(session, date(2024, 6, 1))
 
 
 async def test_reports(client, data):

@@ -19,6 +19,7 @@ from ledger.analytics.reports import EXPENSE, FROM, INCOME, REPORTABLE, category
 from ledger.budgets.service import budget_status, period_for
 from ledger.config import get_settings
 from ledger.models import AlertEvent, AlertRecipient, AlertRule, Anomaly, Budget, DuplicatePair, Statement, Transaction
+from ledger.models.analytics import ANOMALY_LABELS
 
 log = logging.getLogger(__name__)
 
@@ -96,12 +97,11 @@ async def _anomaly_candidates(session: AsyncSession, kinds: tuple[str, ...], rul
             .order_by(Anomaly.score.desc())
         )
     ).all()
-    label = "Large transaction" if rule_kind == "large_transaction" else "Out-of-norm"
     return [
         {
             "kind": rule_kind,
             "subject_key": f"anomaly:{a.id}",
-            "title": f"{label} · {a.title} {money(a.amount)}",
+            "title": f"{ANOMALY_LABELS.get(a.kind, 'Out-of-norm')} · {a.title} {money(a.amount)}",
             "body": a.detail + (f"\n{a.ai_note}" if a.ai_note else ""),
             "link": f"/transactions/{a.transaction_id}" if a.transaction_id else "/findings",
         }

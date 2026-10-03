@@ -84,9 +84,30 @@ async def test_review_flow(client, monkeypatch):
     left = {s["target"]["key"] for s in state["suggestions"]}
     assert left & set(NAMES) == {"mrv dangerouslytastypies"}
 
-    # Reviewed, dismissed and curated keys are skipped next time; the pending rename is replaced.
+    # Reviewed, dismissed and curated keys are skipped next time.
     keys = {c["key"] for c in await _candidates()}
     assert keys & set(NAMES) == {"mrv dangerouslytastypies"}
+
+    # A later run keeps the waiting suggestion, skips its keys, and folds a new key for that business into it.
+    pies = mine["mrv dangerouslytastypies"]["id"]
+    NAMES["mrv pies delivery"] = "MRV Dangerously Tasty Pies"
+    r = await client.post(
+        "/api/transactions", json={"txn_date": "2025-05-01", "description": "MRV PIES DELIVERY", "amount": "-9.00"}
+    )
+    assert r.status_code == 201, r.text
+
+    async def second_generate(prompt, **kwargs):
+        assert "MRV Dangerously Tasty Pies" in prompt.split("Rows")[0]
+        assert "mrv dangerouslytastypies |" not in prompt
+        return await fake_generate(prompt, **kwargs)
+
+    monkeypatch.setattr(merchant_review, "generate", second_generate)
+    result = await merchant_review.merchant_review_job(JobContext(job["id"], "merchant_review", {}))
+    assert result["extended"] == 1
+    state = (await client.get("/api/merchants/review")).json()
+    s = next(x for x in state["suggestions"] if x["id"] == pies)
+    assert s["kind"] == "merge" and [x["key"] for x in s["sources"]] == ["mrv pies delivery"]
+    assert s["reason"] == "2 merchants identified as “MRV Dangerously Tasty Pies”"
 
 
 async def _candidates():

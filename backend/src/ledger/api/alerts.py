@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from ledger.alerts.service import active_recipients, render_digest
 from ledger.config import get_settings
 from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
-from ledger.models import AlertEvent, AlertRecipient, AlertRule
+from ledger.models import AlertEvent, AlertRecipient, AlertRule, Anomaly
 from ledger.schemas import AlertEventOut, AlertRuleIn, AlertRuleOut, JobOut, RecipientIn, RecipientOut
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -100,7 +100,13 @@ async def delete_recipient(rid: int, session: AsyncSession = Depends(get_session
 
 @router.get("/events", response_model=list[AlertEventOut])
 async def list_events(limit: int = Query(20, le=200), session: AsyncSession = Depends(get_session)):
-    return (await session.scalars(select(AlertEvent).order_by(AlertEvent.id.desc()).limit(limit))).all()
+    rows = await session.execute(
+        select(AlertEvent, Anomaly.status)
+        .outerjoin(Anomaly, AlertEvent.subject_key == func.concat("anomaly:", Anomaly.id))
+        .order_by(AlertEvent.id.desc())
+        .limit(limit)
+    )
+    return [AlertEventOut.model_validate(e).model_copy(update={"finding_status": st}) for e, st in rows]
 
 
 @router.post("/test")

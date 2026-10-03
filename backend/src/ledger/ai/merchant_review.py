@@ -7,7 +7,7 @@ import unicodedata
 from collections import defaultdict
 
 from pydantic import BaseModel
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.ai.client import generate
@@ -95,6 +95,18 @@ async def curated(session: AsyncSession) -> dict[str, str | None]:
     return dict((await session.execute(sql)).all())
 
 
+async def lock_review(session: AsyncSession) -> None:
+    """Serialize writers of merchant suggestions (accept/dismiss requests, the review job) until commit."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('merchant_review'))"))
+
+
+async def pending_keys(session: AsyncSession) -> set[str]:
+    rows = await session.execute(
+        select(MerchantSuggestion.target_key, MerchantSuggestion.source_keys).where(MerchantSuggestion.status == "pending")
+    )
+    return {k for target, sources in rows for k in (target, *sources)}
+
+
 def build_suggestions(cands: list[dict], names: dict[str, str], known: dict[str, str | None]) -> list[dict]:
     known_by_norm: dict[str, str] = {}
     for key, display in sorted(known.items()):
@@ -138,16 +150,24 @@ def build_suggestions(cands: list[dict], names: dict[str, str], known: dict[str,
 @job_handler("merchant_review")
 async def merchant_review_job(ctx: JobContext) -> dict:
     sm = get_sessionmaker()
+    include_reviewed = bool(ctx.payload.get("all"))
     async with sm() as session:
-        # A new review supersedes undecided suggestions from the last one.
-        await session.execute(delete(MerchantSuggestion).where(MerchantSuggestion.status == "pending"))
-        await session.commit()
-        cands = await candidates(session, bool(ctx.payload.get("all")))
+        if include_reviewed:
+            # A full re-review supersedes undecided suggestions; otherwise they stay for the user to finish.
+            await lock_review(session)
+            await session.execute(delete(MerchantSuggestion).where(MerchantSuggestion.status == "pending"))
+            await session.commit()
+        waiting = {
+            s.target_key: s.display_name
+            for s in await session.scalars(select(MerchantSuggestion).where(MerchantSuggestion.status == "pending"))
+        }
+        skip = await pending_keys(session)
+        cands = [c for c in await candidates(session, include_reviewed) if c["key"] not in skip]
         known = await curated(session)
     if not cands:
         return {"considered": 0, "named": 0, "merges": 0, "renames": 0, "failed_chunks": 0}
 
-    known_list = "\n".join(sorted({d or default_name(k) for k, d in known.items()})) or "(none yet)"
+    known_list = "\n".join(sorted({d or default_name(k) for k, d in (waiting | known).items()})) or "(none yet)"
     chunks = [cands[i : i + CHUNK] for i in range(0, len(cands), CHUNK)]
     names: dict[str, str] = {}
     slots = asyncio.Semaphore(PARALLEL)
@@ -188,16 +208,33 @@ async def merchant_review_job(ctx: JobContext) -> dict:
     if errors and not names:
         raise errors[0]
 
-    suggestions = build_suggestions(cands, names, known)
+    suggestions = build_suggestions(cands, names, waiting | known)
     involved = {k for s in suggestions for k in (s["target_key"], *s["source_keys"])}
+    added = 0
     async with sm() as session:
-        session.add_all(MerchantSuggestion(job_id=ctx.job_id, **s) for s in suggestions)
+        await lock_review(session)
+        open_by_target = {
+            s.target_key: s
+            for s in await session.scalars(select(MerchantSuggestion).where(MerchantSuggestion.status == "pending"))
+        }
+        for s in suggestions:
+            if (p := open_by_target.get(s["target_key"])) is None:
+                session.add(MerchantSuggestion(job_id=ctx.job_id, **s))
+                added += 1
+                continue
+            # New keys for a business that already has a waiting suggestion join it.
+            p.source_keys = [*p.source_keys, *s["source_keys"]]
+            if p.target_key not in known:
+                p.reason = f"{len(p.source_keys) + 1} merchants identified as “{p.display_name}”"
+            p.kind = "merge"
         # Keys that came back fine as they are count as reviewed; unanswered keys are retried next run.
         await mark_reviewed(session, [k for k in names if k not in involved])
         await session.commit()
     return {
         "considered": len(cands),
         "named": len(names),
+        "added": added,
+        "extended": len(suggestions) - added,
         "merges": sum(s["kind"] == "merge" for s in suggestions),
         "renames": sum(s["kind"] == "rename" for s in suggestions),
         "failed_chunks": len(errors),

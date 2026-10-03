@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ledger.ai.merchant_review import candidates, same_words
+from ledger.ai.merchant_review import candidates, lock_review, pending_keys, same_words
 from ledger.db.engine import get_session
 from ledger.db.filters import id_in
 from ledger.jobs.worker import enqueue, notify_worker
@@ -94,7 +94,7 @@ async def review_state(session: AsyncSession = Depends(get_session)):
     ]
     return {
         "job": JobOut.model_validate(job) if job else None,
-        "unreviewed": len(await candidates(session)),
+        "unreviewed": len({c["key"] for c in await candidates(session)} - await pending_keys(session)),
         "suggestions": suggestions,
     }
 
@@ -113,6 +113,7 @@ async def run_review(body: RunIn, session: AsyncSession = Depends(get_session)):
 
 @router.post("/merchants/review/accept")
 async def accept_suggestions(body: AcceptIn, session: AsyncSession = Depends(get_session)):
+    await lock_review(session)
     rows = {s.id: s for s in await _pending(session, [i.id for i in body.items])}
     accepted = moved = 0
     errors: list[str] = []
@@ -132,6 +133,7 @@ async def accept_suggestions(body: AcceptIn, session: AsyncSession = Depends(get
 
 @router.post("/merchants/review/dismiss")
 async def dismiss_suggestions(body: IdList, session: AsyncSession = Depends(get_session)):
+    await lock_review(session)
     rows = await _pending(session, body.ids)
     for s in rows:
         s.status = "dismissed"

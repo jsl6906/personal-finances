@@ -8,12 +8,17 @@ import { merchantPath } from '../links'
 import { Button, Card, ErrorNote, ProgressBar, Seg } from './ui'
 
 type View = 'merge' | 'rename' | 'minor'
+type Sort = 'txns' | 'merchants'
 type Edit = { name?: string; target?: string; skip?: string[] }
+type Work = { verb: 'Applying' | 'Dismissing'; done: number; total: number; ids: Set<number> }
 const PAGE = 100
 const FOLD = 6
+const BATCH = 20
 const ACTIVE = ['queued', 'running']
+const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
 
 const inView = (s: MerchantSuggestion, v: View) => (v === 'merge' ? s.kind === 'merge' : s.kind === 'rename' && s.minor === (v === 'minor'))
+const txnCount = (s: MerchantSuggestion) => s.target.count + s.sources.reduce((n, m) => n + m.count, 0)
 
 function payload(s: MerchantSuggestion, e: Edit = {}) {
   const members = [s.target, ...s.sources].map((m) => m.key)
@@ -35,15 +40,24 @@ export function MerchantReview() {
   const running = !!shownJob && ACTIVE.includes(shownJob.status)
   const [all, setAll] = useState(false)
   const [view, setView] = useState<View>('merge')
+  const [sort, setSort] = useState<Sort>('txns')
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(PAGE)
   const [edits, setEdits] = useState<Record<number, Edit>>({})
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [message, setMessage] = useState<string | null>(null)
+  const [work, setWork] = useState<Work | null>(null)
+  const [workError, setWorkError] = useState<unknown>(null)
 
   useEffect(() => {
     if (job.data && !ACTIVE.includes(job.data.status)) qc.invalidateQueries({ queryKey: ['merchant-review'] })
   }, [job.data?.status, qc, job.data])
+  useEffect(() => {
+    if (!work) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => { window.removeEventListener('beforeunload', warn) }
+  }, [work])
 
   const suggestions = useMemo(() => review.data?.suggestions ?? [], [review.data])
   const counts = useMemo(() => {
@@ -53,36 +67,60 @@ export function MerchantReview() {
   }, [suggestions])
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    return suggestions.filter((s) => inView(s, view) && (!needle ||
+    const rows = suggestions.filter((s) => inView(s, view) && (!needle ||
       [s.display_name ?? '', ...[s.target, ...s.sources].flatMap((m) => [m.key, m.name, m.sample ?? ''])]
         .some((x) => x.toLowerCase().includes(needle))))
-  }, [suggestions, view, q])
+    const byTxns = (a: MerchantSuggestion, b: MerchantSuggestion) => txnCount(b) - txnCount(a)
+    return rows.sort(sort === 'merchants' ? (a, b) => b.sources.length - a.sources.length || byTxns(a, b) : byTxns)
+  }, [suggestions, view, q, sort])
   const shown = filtered.slice(0, limit)
   const allChecked = shown.length > 0 && shown.every((s) => checked.has(s.id))
 
-  const refresh = () => {
-    setChecked(new Set())
-    for (const k of ['merchant-review', 'transactions', 'details', 'merchants', 'analytics', 'rules']) qc.invalidateQueries({ queryKey: [k] })
-  }
   const run = useMutation({
     mutationFn: () => post<Job>('/merchants/review/run', { all }),
-    onSuccess: (j) => { setMessage(null); setEdits({}); setJobId(j.id); qc.invalidateQueries({ queryKey: ['merchant-review'] }) },
+    onSuccess: (j) => { setMessage(null); setJobId(j.id); qc.invalidateQueries({ queryKey: ['merchant-review'] }) },
   })
-  const accept = useMutation({
-    mutationFn: (items: MerchantSuggestion[]) =>
-      post<ReviewAcceptResult>('/merchants/review/accept', { items: items.map((s) => payload(s, edits[s.id])) }),
-    onSuccess: (r) => {
-      setMessage(`Applied ${r.accepted} suggestion${r.accepted === 1 ? '' : 's'}` +
-        (r.moved ? `; ${r.moved.toLocaleString()} transactions moved to their merged merchant` : '') +
-        (r.errors.length ? `. Skipped: ${r.errors.join('; ')}` : '.'))
-      refresh()
-    },
-  })
-  const dismiss = useMutation({
-    mutationFn: (ids: number[]) => post<{ dismissed: number }>('/merchants/review/dismiss', { ids }),
-    onSuccess: (r) => { setMessage(`Dismissed ${r.dismissed}. Those merchants won't be suggested again.`); refresh() },
-  })
-  const busy = accept.isPending || dismiss.isPending
+  const busy = work !== null
+
+  /** Send in small batches so progress shows and finished batches stick even if a later one fails. */
+  const runBatches = async (items: MerchantSuggestion[], verb: Work['verb']) => {
+    const total = items.length
+    setMessage(null)
+    setWorkError(null)
+    setWork({ verb, done: 0, total, ids: new Set(items.map((s) => s.id)) })
+    let done = 0, accepted = 0, dismissed = 0, moved = 0
+    const errors: string[] = []
+    try {
+      for (let i = 0; i < total; i += BATCH) {
+        const chunk = items.slice(i, i + BATCH)
+        if (verb === 'Applying') {
+          const r = await post<ReviewAcceptResult>('/merchants/review/accept', { items: chunk.map((s) => payload(s, edits[s.id])) })
+          accepted += r.accepted
+          moved += r.moved
+          errors.push(...r.errors)
+        } else {
+          dismissed += (await post<{ dismissed: number }>('/merchants/review/dismiss', { ids: chunk.map((s) => s.id) })).dismissed
+        }
+        const ids = new Set(chunk.map((s) => s.id))
+        qc.setQueryData<MerchantReviewState>(['merchant-review'], (d) => d && { ...d, suggestions: d.suggestions.filter((s) => !ids.has(s.id)) })
+        setChecked((c) => new Set([...c].filter((id) => !ids.has(id))))
+        done += chunk.length
+        setWork((w) => w && { ...w, done })
+      }
+    } catch (e) {
+      setWorkError(e)
+    } finally {
+      const parts = verb === 'Applying'
+        ? [`Applied ${plural(accepted, 'suggestion')}`, moved ? `${plural(moved, 'transaction')} moved to their merged merchant` : '']
+        : [`Dismissed ${plural(dismissed, 'suggestion')}; those merchants won't be suggested again`]
+      if (done < total) parts.push(`stopped with ${total - done} not processed (still waiting below)`)
+      setMessage(parts.filter(Boolean).join('; ') + (errors.length ? `. Skipped: ${errors.join('; ')}` : '.'))
+      setWork(null)
+      for (const k of ['merchant-review', 'transactions', 'details', 'merchants', 'analytics', 'rules']) qc.invalidateQueries({ queryKey: [k] })
+    }
+  }
+  const accept = (items: MerchantSuggestion[]) => { void runBatches(items, 'Applying') }
+  const dismiss = (items: MerchantSuggestion[]) => { void runBatches(items, 'Dismissing') }
 
   const edit = (id: number, patch: Partial<Edit>) => setEdits((m) => ({ ...m, [id]: { ...m[id], ...patch } }))
   const toggle = (id: number) => setChecked((s) => {
@@ -93,7 +131,7 @@ export function MerchantReview() {
   })
   const start = () => {
     const waiting = suggestions.length
-    if (!waiting || confirm(`Start a new review? It replaces the ${waiting} suggestion${waiting === 1 ? '' : 's'} still waiting.`)) run.mutate()
+    if (!all || !waiting || confirm(`Re-review everything? This replaces the ${plural(waiting, 'suggestion')} still waiting.`)) run.mutate()
   }
   const selected = suggestions.filter((s) => checked.has(s.id))
 
@@ -104,18 +142,19 @@ export function MerchantReview() {
         <div className="small">
           Gemini reads every merchant you haven't cleaned up yet (no custom name, nothing merged into it) and proposes
           <strong> merges</strong> of merchants that are the same business — store numbers, cities, card-processor prefixes —
-          and <strong>cleaner names</strong>. Nothing changes until you accept. Accepted and dismissed merchants, and ones that
-          already look right, are skipped next time.
+          and <strong>cleaner names</strong>. Nothing changes until you accept. Suggestions are saved, so you can work through
+          them over several visits; a new review only looks at merchants that aren't already reviewed or waiting, and adds any
+          new store variants to the matching waiting suggestion.
         </div>
         <div className="row">
           <span className="text-muted small">
-            {review.data ? `${review.data.unreviewed.toLocaleString()} merchants not reviewed yet · ${suggestions.length.toLocaleString()} suggestions waiting` : 'Loading…'}
+            {review.data ? `${plural(review.data.unreviewed, 'merchant')} not reviewed yet · ${plural(suggestions.length, 'suggestion')} waiting` : 'Loading…'}
           </span>
           <span className="spacer" />
-          <label className="small row" style={{ gap: 6 }}>
-            <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Include merchants reviewed before
+          <label className="small row" style={{ gap: 6 }} title="Start over: replaces the waiting suggestions">
+            <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Re-review everything
           </label>
-          <Button variant="primary" onClick={start} disabled={running || run.isPending}>Review merchants with AI</Button>
+          <Button variant="primary" onClick={start} disabled={running || run.isPending || busy}>Review merchants with AI</Button>
         </div>
       </Card>
 
@@ -124,7 +163,9 @@ export function MerchantReview() {
           <div className={`callout${shownJob.status === 'failed' ? ' error' : ''}`}>
             <strong>Merchant review · {shownJob.status}</strong> {shownJob.message ?? ''}
             {shownJob.status === 'succeeded' && shownJob.result && (
-              ` · ${shownJob.result.merges} merges and ${shownJob.result.renames} renames suggested from ${Number(shownJob.result.considered).toLocaleString()} merchants` +
+              ` · ${plural(Number(shownJob.result.added ?? 0), 'new suggestion')}` +
+              (shownJob.result.extended ? `, ${Number(shownJob.result.extended)} added to waiting ones` : '') +
+              ` from ${plural(Number(shownJob.result.considered), 'merchant')}` +
               (shownJob.result.failed_chunks ? ` (${shownJob.result.failed_chunks} batches failed; run again to retry them)` : '')
             )}
             {shownJob.status === 'failed' && <div className="small">{shownJob.error?.split('\n')[0]}</div>}
@@ -133,13 +174,22 @@ export function MerchantReview() {
           {running && <ProgressBar fraction={Number(shownJob.progress)} />}
         </div>
       )}
+      {work && (
+        <div className="stack">
+          <div className="callout">
+            <strong>{work.verb} {work.done.toLocaleString()} of {plural(work.total, 'suggestion')}…</strong>{' '}
+            Finished ones drop off the list as each batch is saved; keep this page open until it's done.
+          </div>
+          <ProgressBar fraction={work.total ? work.done / work.total : 0} />
+        </div>
+      )}
       {message && (
         <div className="callout row" style={{ flexWrap: 'nowrap' }}>
           <span style={{ flex: 1 }}>{message}</span>
           <Button variant="ghost" className="small" onClick={() => setMessage(null)}>Dismiss</Button>
         </div>
       )}
-      <ErrorNote error={review.error || run.error || accept.error || dismiss.error} />
+      <ErrorNote error={review.error || run.error || workError} />
 
       <div className="row-3">
         <Seg name="review-view" value={view} onChange={(v) => { setView(v); setLimit(PAGE); setChecked(new Set()) }} options={[
@@ -149,13 +199,19 @@ export function MerchantReview() {
         ]} />
         <input className="input compact" placeholder="Search suggestions…" style={{ width: 220 }} value={q}
           onChange={(e) => { setQ(e.target.value); setLimit(PAGE) }} />
+        {view === 'merge' && (
+          <Seg name="review-sort" value={sort} onChange={(v) => { setSort(v); setLimit(PAGE) }} options={[
+            { value: 'txns', label: 'Most transactions' },
+            { value: 'merchants', label: 'Most merchants' },
+          ]} />
+        )}
       </div>
 
       {selected.length > 0 && (
         <div className="bulk-bar">
           <strong>{selected.length} selected</strong>
-          <Button variant="primary" disabled={busy} onClick={() => accept.mutate(selected)}>Accept</Button>
-          <Button variant="ghost" disabled={busy} onClick={() => dismiss.mutate(selected.map((s) => s.id))}>Dismiss</Button>
+          <Button variant="primary" disabled={busy} onClick={() => accept(selected)}>Accept</Button>
+          <Button variant="ghost" disabled={busy} onClick={() => dismiss(selected)}>Dismiss</Button>
           <span className="spacer" />
           <Button variant="ghost" onClick={() => setChecked(new Set())}>Clear selection</Button>
         </div>
@@ -166,7 +222,7 @@ export function MerchantReview() {
           <thead>
             <tr>
               <th className="check">
-                <input type="checkbox" checked={allChecked} disabled={!shown.length}
+                <input type="checkbox" checked={allChecked} disabled={!shown.length || busy}
                   onChange={() => setChecked(allChecked ? new Set() : new Set(shown.map((s) => s.id)))} />
               </th>
               <th>{view === 'merge' ? 'Merchants to combine' : 'Merchant'}</th>
@@ -177,8 +233,8 @@ export function MerchantReview() {
           <tbody>
             {shown.map((s) => (
               <SuggestionRow key={s.id} s={s} e={edits[s.id] ?? {}} checked={checked.has(s.id)} busy={busy}
-                onCheck={() => toggle(s.id)} onEdit={(p) => edit(s.id, p)}
-                onAccept={() => accept.mutate([s])} onDismiss={() => dismiss.mutate([s.id])} />
+                working={!!work?.ids.has(s.id)} onCheck={() => toggle(s.id)} onEdit={(p) => edit(s.id, p)}
+                onAccept={() => accept([s])} onDismiss={() => dismiss([s])} />
             ))}
             {review.isSuccess && filtered.length === 0 && (
               <tr><td colSpan={4} className="empty text-muted">
@@ -198,8 +254,8 @@ export function MerchantReview() {
   )
 }
 
-function SuggestionRow({ s, e, checked, busy, onCheck, onEdit, onAccept, onDismiss }: {
-  s: MerchantSuggestion; e: Edit; checked: boolean; busy: boolean
+function SuggestionRow({ s, e, checked, busy, working, onCheck, onEdit, onAccept, onDismiss }: {
+  s: MerchantSuggestion; e: Edit; checked: boolean; busy: boolean; working: boolean
   onCheck: () => void; onEdit: (p: Partial<Edit>) => void; onAccept: () => void; onDismiss: () => void
 }) {
   const target = e.target ?? s.target.key
@@ -209,8 +265,8 @@ function SuggestionRow({ s, e, checked, busy, onCheck, onEdit, onAccept, onDismi
   const [open, setOpen] = useState(false)
   const visible = open ? members : members.filter((m, i) => i < FOLD || m.key === target)
   return (
-    <tr className={checked ? 'selected' : undefined}>
-      <td className="check"><input type="checkbox" checked={checked} onChange={onCheck} /></td>
+    <tr className={checked ? 'selected' : undefined} style={working ? { opacity: 0.55 } : undefined}>
+      <td className="check"><input type="checkbox" checked={checked} disabled={busy} onChange={onCheck} /></td>
       <td>
         {s.kind === 'merge' ? (
           <div style={{ display: 'grid', gap: 4 }}>
@@ -240,11 +296,13 @@ function SuggestionRow({ s, e, checked, busy, onCheck, onEdit, onAccept, onDismi
           onChange={(ev) => onEdit({ name: ev.target.value })} />
       </td>
       <td className="nowrap">
-        <Button variant="ghost" className="small" disabled={busy || (s.kind === 'merge' && included.length < 2 && !(e.name ?? s.display_name))}
-          onClick={onAccept}>
-          {s.kind === 'merge' && included.length > 1 ? `Merge ${included.length}` : 'Rename'}
-        </Button>
-        <Button variant="ghost" className="small" disabled={busy} onClick={onDismiss}>Dismiss</Button>
+        {working ? <span className="small muted-2">Working…</span> : <>
+          <Button variant="ghost" className="small" disabled={busy || (s.kind === 'merge' && included.length < 2 && !(e.name ?? s.display_name))}
+            onClick={onAccept}>
+            {s.kind === 'merge' && included.length > 1 ? `Merge ${included.length}` : 'Rename'}
+          </Button>
+          <Button variant="ghost" className="small" disabled={busy} onClick={onDismiss}>Dismiss</Button>
+        </>}
       </td>
     </tr>
   )

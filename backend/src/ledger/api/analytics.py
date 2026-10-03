@@ -109,7 +109,7 @@ async def merchants(
 
 @router.get("/anomalies")
 async def list_anomalies(
-    status: Literal["open", "reviewed", "dismissed", "all"] = "open",
+    status: Literal["open", "reviewed", "dismissed", "withdrawn", "all"] = "open",
     transaction_id: int | None = None,
     category_id: int | None = None,
     group_id: int | None = None,

@@ -119,10 +119,10 @@ async def test_anomaly_alerts_respect_rules(client, outbox):
         await alerts.evaluate(s)
     [event] = await _events("TAL Spike")
     assert event.kind == "out_of_norm" and event.status == "sent"
-    assert "Out-of-norm" in event.title
+    assert event.title.startswith("Category spike · TAL Spike")
 
     listed = (await client.get("/api/alerts/events")).json()
-    assert any(e["id"] == event.id for e in listed)
+    assert any(e["id"] == event.id and e["finding_status"] == "open" for e in listed)
 
 
 async def test_undelivered_without_smtp(client):

@@ -112,6 +112,9 @@ export function Alerts() {
                     {e.status}{e.error ? ` · ${e.error}` : ''}
                   </span>
                 )}
+                {e.finding_status && e.finding_status !== 'open' && (
+                  <span className="tag tag-neutral" style={{ justifySelf: 'start', fontSize: 11 }}>finding {e.finding_status}</span>
+                )}
               </div>
             ))}
             {events.data?.length === 0 && <div className="text-muted">Nothing yet.</div>}

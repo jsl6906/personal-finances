@@ -28,7 +28,9 @@ export function AnomalyList({ items, limit }: { items: Anomaly[]; limit?: number
             <div className="row" style={{ gridColumn: '1 / -1', gap: 6, marginTop: 4 }}>
               <span className="tag tag-accent">{ANOMALY_LABEL[a.kind] ?? a.kind}</span>
               <Link to={link} className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 6px' }}>Review</Link>
-              {a.status === 'open' ? (
+              {a.status === 'withdrawn' ? (
+                <span className="tag tag-neutral" title="A later check found this no longer holds">Withdrawn</span>
+              ) : a.status === 'open' ? (
                 <>
                   <Button variant="ghost" style={{ fontSize: 12, padding: '2px 6px' }} disabled={act.isPending}
                     onClick={() => act.mutate({ id: a.id, action: 'review' })}>Mark reviewed</Button>

@@ -266,6 +266,8 @@ export interface AlertEvent {
   id: number; kind: AlertKind; title: string; body: string; link: string | null
   status: 'pending' | 'sent' | 'failed' | 'skipped'; recipients: string[]; error: string | null
   created_at: string; sent_at: string | null
+  /** Current status of the finding an out-of-norm/large-transaction alert was about (null for other alerts or if gone). */
+  finding_status: string | null
 }
 export interface AlertStatus {
   smtp_configured: boolean; smtp_host: string | null; smtp_from: string | null; app_base_url: string | null

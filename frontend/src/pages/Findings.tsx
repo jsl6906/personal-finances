@@ -7,7 +7,7 @@ import { Button, Card, ErrorNote, Seg } from '../components/ui'
 import { monthLabel, parseIso } from '../format'
 import { useAnomalies, useJob } from '../hooks'
 
-type Status = 'open' | 'reviewed' | 'dismissed'
+type Status = 'open' | 'reviewed' | 'dismissed' | 'withdrawn'
 
 export function Findings() {
   const qc = useQueryClient()
@@ -60,6 +60,7 @@ export function Findings() {
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <Seg name="fstatus" value={status} onChange={(v) => setFilter('status', v, 'open')} options={[
           { value: 'open', label: 'Open' }, { value: 'reviewed', label: 'Reviewed' }, { value: 'dismissed', label: 'Dismissed' },
+          { value: 'withdrawn', label: 'Withdrawn' },
         ]} />
         <Seg name="fkind" value={kind} onChange={(v) => setFilter('kind', v, 'all')} options={[
           { value: 'all', label: `All ${all.length}` },
@@ -82,7 +83,8 @@ export function Findings() {
       )}
 
       <div className="card-meta">Checks run nightly and after each import: category spikes vs. 12-month norm, unusually large purchases for a
-        merchant, large one-off transactions, first purchases at new merchants, bill increases, and transfers with no matching leg.</div>
+        merchant, large one-off transactions, first purchases at new merchants, bill increases, and transfers with no matching leg.
+        Findings that a later check no longer confirms (e.g. after re-categorizing) move to Withdrawn.</div>
     </section>
   )
 }

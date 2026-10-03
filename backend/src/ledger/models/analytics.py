@@ -14,7 +14,16 @@ ANOMALY_KINDS = (
     "bill_increase",
     "unmatched_transfer",
 )
-ANOMALY_STATUSES = ("open", "reviewed", "dismissed")
+ANOMALY_LABELS = {
+    "category_spike": "Category spike",
+    "large_for_merchant": "Large for merchant",
+    "large_transaction": "Large transaction",
+    "new_merchant": "New merchant",
+    "bill_increase": "Bill increase",
+    "unmatched_transfer": "Unmatched transfer",
+}
+# withdrawn = a later check found it no longer holds; kept so alerts already sent still point at it.
+ANOMALY_STATUSES = ("open", "reviewed", "dismissed", "withdrawn")
 
 
 class Anomaly(Base):

@@ -537,3 +537,4 @@ class AlertEventOut(ORM):
     error: str | None
     created_at: datetime
     sent_at: datetime | None
+    finding_status: str | None = None
