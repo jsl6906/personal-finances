@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 import ledger.ai.categorize  # noqa: F401  (registers job handler)
+import ledger.ai.merchant_review  # noqa: F401  (registers job handler)
 import ledger.analytics.jobs  # noqa: F401  (registers job handlers)
 import ledger.imports.jobs  # noqa: F401  (registers job handlers)
 import ledger.maintenance  # noqa: F401  (registers job handlers)
@@ -23,6 +24,7 @@ from ledger.api import (
     details,
     duplicates,
     imports,
+    merchant_review,
     misc,
     reference,
     rules,
@@ -81,6 +83,7 @@ app.include_router(statements.router, prefix="/api", dependencies=protected)
 app.include_router(budgets.router, prefix="/api", dependencies=protected)
 app.include_router(analytics.router, prefix="/api", dependencies=protected)
 app.include_router(details.router, prefix="/api", dependencies=protected)
+app.include_router(merchant_review.router, prefix="/api", dependencies=protected)
 app.include_router(chat.router, prefix="/api", dependencies=protected)
 app.include_router(alerts.router, prefix="/api", dependencies=protected)
 app.include_router(sources.router, prefix="/api", dependencies=protected)

@@ -4,18 +4,19 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { del, get, put, type CategoryAlias, type CategoryRule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { CrudTable } from '../components/CrudTable'
+import { MerchantReview } from '../components/MerchantReview'
 import { RuleEditor } from '../components/RuleEditor'
 import { Button, Card, ErrorNote, Seg } from '../components/ui'
 import { useCategories } from '../hooks'
 import { categoryPath } from '../links'
 import { ruleBody, ruleDraft, SOURCE_LABELS } from '../rules'
 
-type Tab = 'rules' | 'aliases'
+type Tab = 'rules' | 'aliases' | 'merchants'
 const SHOW = 200
 
 export function Rules() {
   const [params, setParams] = useSearchParams()
-  const [tab, setTab] = useState<Tab>('rules')
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'merchants' ? 'merchants' : 'rules'))
   return (
     <section className="page">
       <header className="page-header">
@@ -38,8 +39,9 @@ export function Rules() {
       </Card>
       <Seg name="tab" value={tab} onChange={setTab} options={[
         { value: 'rules', label: 'Rules' }, { value: 'aliases', label: 'Import label mappings' },
+        { value: 'merchants', label: 'Merchant cleanup' },
       ]} />
-      {tab === 'rules' ? <RuleList params={params} setParams={setParams} /> : <AliasTable />}
+      {tab === 'rules' ? <RuleList params={params} setParams={setParams} /> : tab === 'aliases' ? <AliasTable /> : <MerchantReview />}
     </section>
   )
 }

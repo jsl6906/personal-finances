@@ -419,6 +419,15 @@ export interface RulePreview {
 }
 export interface CategoryAlias { id: number; alias: string; category_id: number; category_name: string }
 
+// ---- AI merchant review ----
+export interface ReviewMember { key: string; name: string; count: number; last_date: string | null; sample: string | null }
+export interface MerchantSuggestion {
+  id: number; kind: 'merge' | 'rename'; display_name: string | null; reason: string | null; minor: boolean
+  target: ReviewMember; sources: ReviewMember[]
+}
+export interface MerchantReviewState { job: Job | null; unreviewed: number; suggestions: MerchantSuggestion[] }
+export interface ReviewAcceptResult { accepted: number; moved: number; errors: string[] }
+
 // ---- statements ----
 export interface Usage { id?: number; metric: string; value: string; unit: string | null; is_primary: boolean }
 export interface LinkCandidate {

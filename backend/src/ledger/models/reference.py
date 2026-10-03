@@ -1,6 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -114,7 +115,6 @@ class CategoryRule(TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
-
 class MerchantProfile(TimestampMixin, Base):
     """User curation of a merchant key: a display name, or `alias_of` to merge it into another (canonical) key."""
 
@@ -123,3 +123,23 @@ class MerchantProfile(TimestampMixin, Base):
     key: Mapped[str] = mapped_column(String(200), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(200))
     alias_of: Mapped[str | None] = mapped_column(String(200), index=True)
+    # Set once an AI merchant review has looked at the key and the user acted (or nothing was suggested).
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+MERCHANT_SUGGESTION_KINDS = ("merge", "rename")
+MERCHANT_SUGGESTION_STATUSES = ("pending", "accepted", "dismissed")
+
+
+class MerchantSuggestion(TimestampMixin, Base):
+    """AI merchant-review proposal: merge `source_keys` into `target_key` and/or give it `display_name`."""
+
+    __tablename__ = "merchant_suggestion"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(20))
+    target_key: Mapped[str] = mapped_column(String(200))
+    source_keys: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)

@@ -19,6 +19,7 @@ from ledger.models.reference import (
     HouseholdMember,
     Institution,
     MerchantProfile,
+    MerchantSuggestion,
     Tag,
 )
 from ledger.models.sources import AccountBalance, Holding, Source
@@ -53,6 +54,7 @@ __all__ = [
     "Institution",
     "Job",
     "MerchantProfile",
+    "MerchantSuggestion",
     "Source",
     "SpreadRule",
     "Statement",

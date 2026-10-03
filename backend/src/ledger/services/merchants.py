@@ -3,11 +3,11 @@
 import re
 from string import capwords
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.db.filters import id_in
-from ledger.models import CategoryRule, MerchantProfile, Transaction
+from ledger.models import CategoryRule, MerchantProfile, MerchantSuggestion, Transaction
 from ledger.services.normalize import normalize_merchant
 
 _USER_NON_WORD = re.compile(r"[^a-z0-9&' ]+")
@@ -142,3 +142,49 @@ async def unmerge(session: AsyncSession, source: str) -> int:
     if ids:
         await session.execute(update(Transaction).where(id_in(Transaction.id, ids)).values(merchant=source))
     return len(ids)
+
+
+async def mark_reviewed(session: AsyncSession, keys: list[str]) -> None:
+    """Keep these keys out of future AI merchant reviews (unless a re-review of everything is asked for)."""
+    if not keys:
+        return
+    await session.flush()
+    await session.execute(
+        text(
+            """--sql
+            INSERT INTO merchant_profile (key, reviewed_at) SELECT DISTINCT unnest(CAST(:keys AS text[])), now()
+            ON CONFLICT (key) DO UPDATE SET reviewed_at = now(), updated_at = now()
+            """
+        ),
+        {"keys": list(keys)},
+    )
+
+
+async def accept_suggestion(
+    session: AsyncSession,
+    s: MerchantSuggestion,
+    target: str | None = None,
+    keys: list[str] | None = None,
+    name: str | None = None,
+) -> int:
+    """Apply an AI merchant suggestion, optionally edited: keep `target`, merge only `keys`, use `name`.
+
+    Returns transactions moved.
+    """
+    members = [s.target_key, *s.source_keys]
+    target = target or s.target_key
+    if target not in members:
+        raise MerchantError("Pick the merchant to keep from this suggestion")
+    chosen = members if keys is None else [k for k in members if k in set(keys)]
+    target = await resolve(session, target)
+    moved = 0
+    for k in chosen:
+        # Skip the target itself and keys merged elsewhere since the review ran.
+        if k != target and await resolve(session, k) == k:
+            moved += await merge(session, k, target)
+    name = ((s.display_name if name is None else name) or "").strip()
+    if name:
+        await rename(session, target, name)
+    await mark_reviewed(session, members)
+    s.status = "accepted"
+    return moved
