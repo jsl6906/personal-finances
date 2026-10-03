@@ -361,6 +361,10 @@ class DecisionIn(BaseModel):
     decision: Literal["skip_duplicate", "keep", "insert", "pending"]
 
 
+class BulkDecisionIn(DecisionIn):
+    row_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
 class CommitIn(BaseModel):
     pending_as: Literal["skip", "keep"] = "skip"
 

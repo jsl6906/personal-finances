@@ -33,7 +33,8 @@ async def test_budget_status_with_spreading(client, cats):
     b1 = (await client.post("/api/budgets", json={"category_id": cats["groc"]["id"], "amount": "400"})).json()
     await client.post("/api/budgets", json={"category_id": cats["ins"]["id"], "period_type": "year", "amount": "1200"})
     assert (await client.post("/api/budgets", json={"category_id": cats["groc"]["id"], "amount": "1"})).status_code == 409
-    assert (await client.post("/api/budgets", json={"amount": "1"})).status_code == 422
+    both = {"category_id": cats["groc"]["id"], "group_id": cats["group"]["id"], "amount": "1"}
+    assert (await client.post("/api/budgets", json=both)).status_code == 422
 
     s = (await client.get("/api/budgets/status", params={"period": "month", "on": "2025-03-15"})).json()
     assert s["period"]["label"] == "March 2025" and s["period"]["elapsed"] == 1.0
@@ -60,7 +61,26 @@ async def test_budget_status_with_spreading(client, cats):
     assert gb["name"] == "TB Group"
     s = (await client.get("/api/budgets/status", params={"period": "month", "on": "2025-03-15"})).json()
     rows = {r["name"]: r for r in s["rows"]}
-    assert rows["TB Group"]["actual"] == 550
+    # Insurance (100/mo) still has its own budget, so the group row is the remainder
+    g_row = rows["TB Group · everything else"]
+    assert g_row["budget"] == 400 and g_row["allocated"] == 100 and g_row["total_budget"] == 500
+    assert g_row["actual"] == 450  # 550 group spend minus insurance's 100
+    assert rows["TB Insurance"]["actual"] == 100
+
+    # Overall budget: net of the group budget (which already contains the insurance budget)
+    ob = (await client.post("/api/budgets", json={"amount": "1000"})).json()
+    assert ob["name"] == "All spending" and ob["category_id"] is None and ob["group_id"] is None
+    assert (await client.post("/api/budgets", json={"amount": "5"})).status_code == 409
+    s = (await client.get("/api/budgets/status", params={"period": "month", "on": "2025-03-15"})).json()
+    rows = {r["name"]: r for r in s["rows"]}
+    rest = rows["Everything else"]
+    # Other test modules may have added budgets; the group budget (500) must be in the allocation, insurance not twice
+    assert rest["scope"] == "overall" and rest["total_budget"] == 1000 and rest["allocated"] >= 500
+    assert rest["budget"] == 1000 - rest["allocated"]
+    assert [r["scope"] for r in s["rows"] if r["kind"] == "expense"][-1] == "overall"
+    assert s["total"]["budget"] == 1000 and s["unbudgeted"] == []
+    assert (await client.get("/api/budgets")).json()[-1]["name"] == "All spending"
+    await client.delete(f"/api/budgets/{ob['id']}")
 
 
 async def test_budget_suggestions(client, cats):

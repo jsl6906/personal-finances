@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ledger.budgets.service import budget_status, period_for, rule_matches, suggest_budgets
+from ledger.budgets.service import OVERALL_NAME, budget_status, period_for, rule_matches, suggest_budgets
 from ledger.db.engine import get_session
 from ledger.models import Budget, Category, CategoryGroup, SpreadRule
 
@@ -24,8 +24,8 @@ class BudgetIn(BaseModel):
 
     @model_validator(mode="after")
     def _one_target(self):
-        if (self.category_id is None) == (self.group_id is None):
-            raise ValueError("Set exactly one of category_id or group_id")
+        if self.category_id is not None and self.group_id is not None:
+            raise ValueError("Set category_id or group_id, not both (neither = overall spending)")
         return self
 
 
@@ -59,8 +59,10 @@ class RuleOut(RuleIn):
 async def _budget_out(session: AsyncSession, b: Budget) -> BudgetOut:
     if b.category_id:
         name = await session.scalar(select(Category.name).where(Category.id == b.category_id))
-    else:
+    elif b.group_id:
         name = await session.scalar(select(CategoryGroup.name).where(CategoryGroup.id == b.group_id))
+    else:
+        name = OVERALL_NAME
     return BudgetOut(
         id=b.id,
         name=name or "?",
@@ -77,7 +79,7 @@ async def _commit(session: AsyncSession) -> None:
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(409, "That category or group already has a budget") from None
+        raise HTTPException(409, "That category, group or overall spending already has a budget") from None
 
 
 @router.get("/budgets", response_model=list[BudgetOut])

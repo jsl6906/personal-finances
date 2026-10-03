@@ -23,6 +23,18 @@ THRESHOLD = 0.55
 AI_BATCH = 40
 
 
+def _norm_desc(s: str | None) -> str:
+    return " ".join((s or "").split()).casefold()
+
+
+def other_description(incoming: str | None, *known: str | None) -> str | None:
+    """The duplicate's description when it tells us something the surviving transaction doesn't already say."""
+    d = " ".join((incoming or "").split())
+    if not d or _norm_desc(d) in {_norm_desc(k) for k in known if k}:
+        return None
+    return d
+
+
 def score_pair(dd: int, same_acct: bool | None, sim: float, exact: bool) -> tuple[float, list[str]]:
     if exact:
         return 1.0, ["Exact match on account, date, amount and merchant"]

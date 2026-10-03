@@ -65,6 +65,10 @@ a:hover { color: var(--color-accent-900); }
   flex-direction: column; gap: var(--space-2); }
 
 .table-card { padding: 0; min-width: 0; overflow-x: auto; }
+/* Card whose body scrolls to fit the height set by its grid sibling instead of growing the row. */
+.fill-card { min-height: 320px; }
+.fill-card > .fill-scroll { flex: 1; min-height: 0; position: relative; }
+.fill-card > .fill-scroll > * { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: thin; }
 .table tbody tr.clickable { cursor: pointer; }
 .table tbody tr.selected { background: var(--color-accent-100); }
 .table td.check, .table th.check { width: 28px; padding-right: 0; }
@@ -182,6 +186,8 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
   .mh-row { grid-template-columns: minmax(0, 1fr); gap: 0; padding-top: var(--space-2); }
   .kpi-value { font-size: 26px; }
   .big-amount { font-size: 28px; }
+
+  .fill-card > .fill-scroll > * { position: static; max-height: 420px; }
 
   .split-nav > .side-nav { flex-direction: row; overflow-x: auto; gap: var(--space-1); padding-bottom: 2px; }
   .split-nav > .side-nav > * { flex: none; width: auto; max-width: 70vw; }

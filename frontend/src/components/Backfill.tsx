@@ -184,7 +184,8 @@ function BackfillSettingsForm({ overview, open: initiallyOpen }: { overview: Bac
   const cfg = overview.settings
   const [open, setOpen] = useState(initiallyOpen)
   const [provider, setProvider] = useState<'drive' | 'local'>(cfg.provider)
-  const [folder, setFolder] = useState(cfg.provider === 'local' ? cfg.local_path : cfg.folder_id ?? '')
+  const driveUrl = cfg.folder_id ? `https://drive.google.com/drive/folders/${cfg.folder_id}` : ''
+  const [folder, setFolder] = useState(cfg.provider === 'local' ? cfg.local_path : driveUrl)
   const [approve, setApprove] = useState(cfg.auto_approve_bills)
   const save = useMutation({
     mutationFn: () => put('/backfill/settings', { provider, folder, auto_approve_bills: approve }),
@@ -200,6 +201,11 @@ function BackfillSettingsForm({ overview, open: initiallyOpen }: { overview: Bac
           {overview.google_service_account
             ? <>Share the archive folder (Viewer) with <code style={{ userSelect: 'all' }}>{overview.google_service_account}</code>, then paste its URL. Subfolders are included.</>
             : <>Configure the Google service account first (see the Tiller card).</>}
+          {cfg.provider === 'drive' && cfg.folder_id && (
+            <div style={{ marginTop: 'var(--space-1)' }}>
+              Current folder: <a href={driveUrl} target="_blank" rel="noopener noreferrer"><strong>{cfg.folder_name ?? cfg.folder_id}</strong></a>
+            </div>
+          )}
         </div>
       ) : (
         <div className="small">

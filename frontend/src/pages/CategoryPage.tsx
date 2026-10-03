@@ -1,9 +1,10 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { get, type CategoryDetail } from '../api'
+import { get, put, type CategoryDetail } from '../api'
 import { MonthlyBars } from '../components/Charts'
-import { Breakdown, Findings, Kpis, RangeSeg, TxnList, YearTable } from '../components/Detail'
-import { Card, ErrorNote } from '../components/ui'
+import { Breakdown, Findings, Kpis, RangeSeg, RenameCard, TxnList, YearTable } from '../components/Detail'
+import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, measure, rangeLabel, summarize, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso } from '../format'
 import { groupPath, merchantPath } from '../links'
@@ -19,6 +20,18 @@ function CategoryView({ id }: { id: number }) {
     queryKey: ['details', 'category', id, r.start],
     queryFn: () => get<CategoryDetail>(`/categories/${id}/detail`, { start: r.start }),
     placeholderData: keepPreviousData,
+  })
+  const qc = useQueryClient()
+  const [renaming, setRenaming] = useState(false)
+  const rename = useMutation({
+    mutationFn: (name: string) => {
+      const { id: _id, group_name: _g, ...rest } = q.data!.category
+      return put(`/categories/${id}`, { ...rest, name })
+    },
+    onSuccess: () => {
+      setRenaming(false)
+      for (const k of ['details', 'categories', 'transactions', 'analytics', 'budgets', 'rules']) qc.invalidateQueries({ queryKey: [k] })
+    },
   })
   const d = q.data
   if (q.error) return <section className="page"><ErrorNote error={q.error} /></section>
@@ -41,8 +54,16 @@ function CategoryView({ id }: { id: number }) {
             {c.description && <span>· {c.description}</span>}
           </div>
         </div>
-        <RangeSeg value={r.range} onChange={r.setRange} />
+        <div className="row">
+          <RangeSeg value={r.range} onChange={r.setRange} />
+          <Button onClick={() => setRenaming(!renaming)}>Rename</Button>
+        </div>
       </header>
+      <ErrorNote error={rename.error} />
+      {renaming && (
+        <RenameCard initial={c.name} pending={rename.isPending} onSave={rename.mutate} onCancel={() => setRenaming(false)}
+          meta="Transactions, rules and budgets follow the rename. The old name is kept as an import alias so files using it still map here." />
+      )}
 
       <Kpis items={[
         { k: 'This month', v: money(sum.current),

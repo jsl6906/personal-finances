@@ -39,6 +39,7 @@ from ledger.models import (
     TransactionSource,
 )
 from ledger.services.categorize import apply_rules
+from ledger.services.dedupe import other_description
 from ledger.services.merchants import alias_map, canonical
 from ledger.services.normalize import fingerprint, normalize_merchant
 
@@ -467,7 +468,8 @@ async def _record_sources(session: AsyncSession, batch: ImportBatch, new_txns: l
     ]
     matched = (
         await session.execute(
-            select(ImportRow, DuplicatePair.txn_a_id, DuplicatePair.score)
+            select(ImportRow, DuplicatePair.txn_a_id, DuplicatePair.score, Transaction.description,
+                   Transaction.original_description)
             .join(DuplicatePair, DuplicatePair.import_row_id == ImportRow.id)
             .join(Transaction, Transaction.id == DuplicatePair.txn_a_id)
             .where(
@@ -480,7 +482,7 @@ async def _record_sources(session: AsyncSession, batch: ImportBatch, new_txns: l
         )
     ).all()
     notes: list[tuple[int, str]] = []
-    for r, txn_id, score in matched:
+    for r, txn_id, score, existing_desc, existing_orig in matched:
         values.append(
             {**base, "transaction_id": txn_id, "role": "matched", "import_row_id": r.id, "txn_date": r.txn_date,
              "description": r.description, "amount": r.amount, "match_score": score}
@@ -489,6 +491,9 @@ async def _record_sources(session: AsyncSession, batch: ImportBatch, new_txns: l
         body = (_collect(r.raw, batch.mapping).get("notes") or "").strip()
         if body:
             notes.append((txn_id, body))
+        other = other_description(r.description, existing_desc, existing_orig)
+        if other:
+            notes.append((txn_id, f"Also described as: {other}"))
     for start in range(0, len(values), 1000):
         await session.execute(insert(TransactionSource).values(values[start : start + 1000]).on_conflict_do_nothing())
     if notes:

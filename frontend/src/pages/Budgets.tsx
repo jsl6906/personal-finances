@@ -27,6 +27,7 @@ export function Budgets() {
   const s = status.data
   const refresh = () => qc.invalidateQueries({ queryKey: ['budgets'] })
   const remove = useMutation({ mutationFn: (id: number) => del(`/budgets/${id}`), onSuccess: refresh })
+  const hasOverall = (budgets.data ?? []).some((b) => !b.category_id && !b.group_id)
 
   const elapsed = s?.period.elapsed ?? 0
   return (
@@ -61,10 +62,11 @@ export function Budgets() {
                 {(s?.rows ?? []).map((r) => {
                   const b = budgets.data?.find((x) => x.id === r.budget_id)
                   if (editing === r.budget_id && b) {
-                    return <BudgetEditor key={r.budget_id} budget={b} onDone={() => { setEditing(null); refresh() }} />
+                    return <BudgetEditor key={r.budget_id} budget={b} hasOverall={hasOverall} onDone={() => { setEditing(null); refresh() }} />
                   }
                   const over = r.status === 'over'
                   const note = [r.group, r.period_type !== period ? `${money(r.base_amount)}/${r.period_type}` : '',
+                    r.allocated ? `${money(r.total_budget)} less ${money(r.allocated)} budgeted elsewhere` : '',
                     r.spread_amount ? `incl. ${money(r.spread_amount)} spread` : '',
                     r.status === 'pace' ? `on pace for ${money(r.projected)}` : '', r.notes].filter(Boolean).join(' · ')
                   return (
@@ -97,9 +99,9 @@ export function Budgets() {
                     </tr>
                   )
                 })}
-                {editing === 'new' && <BudgetEditor budget={null} onDone={() => { setEditing(null); refresh() }} />}
+                {editing === 'new' && <BudgetEditor budget={null} hasOverall={hasOverall} onDone={() => { setEditing(null); refresh() }} />}
                 {s && s.rows.length === 0 && editing !== 'new' && (
-                  <tr><td colSpan={6} className="text-muted">No budgets yet — add one or use suggestions from your history.</td></tr>
+                  <tr><td colSpan={6} className="text-muted">No budgets yet — add one for a category, a group or all spending, or use suggestions from your history.</td></tr>
                 )}
               </tbody>
             </table>
@@ -138,9 +140,11 @@ export function Budgets() {
   )
 }
 
-function BudgetEditor({ budget, onDone }: { budget: Budget | null; onDone: () => void }) {
+type Target = 'category' | 'group' | 'overall'
+
+function BudgetEditor({ budget, hasOverall, onDone }: { budget: Budget | null; hasOverall: boolean; onDone: () => void }) {
   const groups = useGroups()
-  const [target, setTarget] = useState<'category' | 'group'>(budget?.group_id ? 'group' : 'category')
+  const [target, setTarget] = useState<Target>(budget?.group_id ? 'group' : budget?.category_id ? 'category' : budget ? 'overall' : 'category')
   const [categoryId, setCategoryId] = useState<number | null>(budget?.category_id ?? null)
   const [groupId, setGroupId] = useState<number | null>(budget?.group_id ?? null)
   const [periodType, setPeriodType] = useState<PeriodType>(budget?.period_type ?? 'month')
@@ -156,25 +160,29 @@ function BudgetEditor({ budget, onDone }: { budget: Budget | null; onDone: () =>
     },
     onSuccess: onDone,
   })
-  const valid = Number(amount) > 0 && (target === 'category' ? categoryId : groupId)
+  const editingOverall = !!budget && !budget.category_id && !budget.group_id
+  const valid = Number(amount) > 0 && (target === 'category' ? categoryId : target === 'group' ? groupId : true)
   return (
     <tr className="selected">
       <td colSpan={6}>
         <div className="grid-form" style={{ alignItems: 'end' }}>
           <Field label="Budget for">
-            <select className="input" value={target} onChange={(e) => setTarget(e.target.value as 'category' | 'group')}>
+            <select className="input" value={target} onChange={(e) => setTarget(e.target.value as Target)}>
               <option value="category">Category</option><option value="group">Category group</option>
+              <option value="overall" disabled={hasOverall && !editingOverall}>All spending</option>
             </select>
           </Field>
           {target === 'category' ? (
             <Field label="Category"><CategorySelect value={categoryId} onChange={setCategoryId} emptyLabel="Choose…" /></Field>
-          ) : (
+          ) : target === 'group' ? (
             <Field label="Group">
               <select className="input" value={groupId ?? ''} onChange={(e) => setGroupId(e.target.value ? Number(e.target.value) : null)}>
                 <option value="">Choose…</option>
                 {(groups.data ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </Field>
+          ) : (
+            <Field label="Scope"><div className="small text-muted" style={{ paddingBottom: 8 }}>All expense categories; shown as “Everything else” after other budgets.</div></Field>
           )}
           <Field label="Amount"><input className="input" type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
           <Field label="Per">

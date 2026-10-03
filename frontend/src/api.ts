@@ -339,7 +339,7 @@ export interface MerchantDetail extends EntityDetail {
 }
 export interface AccountDetail extends EntityDetail {
   account: {
-    id: number; name: string; institution_name: string | null; account_type: string; mask: string | null
+    id: number; name: string; institution_id: number | null; institution_name: string | null; account_type: string; mask: string | null
     is_hidden: boolean; is_closed: boolean; notes: string | null; sources: string[]
   }
   balance: { as_of: string; balance: number; available: number | null; source: string } | null
@@ -381,8 +381,10 @@ export interface Budget {
   amount: string; notes: string | null
 }
 export interface BudgetRow {
-  budget_id: number; category_id: number | null; group_id: number | null; name: string; group: string | null
-  kind: string; period_type: PeriodType; base_amount: number; budget: number; actual: number; left: number
+  budget_id: number; category_id: number | null; group_id: number | null; scope: 'category' | 'group' | 'overall'
+  name: string; group: string | null
+  kind: string; period_type: PeriodType; base_amount: number; total_budget: number; allocated: number; budget: number
+  actual: number; left: number
   pct: number; projected: number; spread_amount: number; notes: string | null; status: 'ok' | 'pace' | 'over'
 }
 export interface BudgetStatus {

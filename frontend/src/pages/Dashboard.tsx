@@ -18,7 +18,7 @@ export function Dashboard() {
   const summary = useQuery({ queryKey: ['summary', start, end], queryFn: () => get<Summary>('/summary', { start, end }) })
   const recent = useQuery({
     queryKey: ['transactions', 'recent'],
-    queryFn: () => get<TransactionPage>('/transactions', { limit: 8, sort: 'date_desc' }),
+    queryFn: () => get<TransactionPage>('/transactions', { limit: 40, sort: 'date_desc' }),
   })
   const accounts = useAccounts()
   const budget = useQuery({
@@ -116,7 +116,7 @@ export function Dashboard() {
       </div>
 
       <div className="grid-2">
-        <Card>
+        <Card className="fill-card">
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div>
               <div className="card-kicker">Latest</div>
@@ -124,13 +124,15 @@ export function Dashboard() {
             </div>
             <Link to="/transactions" className="btn btn-ghost">All transactions</Link>
           </div>
+          <div className="fill-scroll">
+          <div>
           <table className="table">
             <tbody>
               {(recent.data?.items ?? []).map((t) => (
                 <tr key={t.id}>
                   <td className="nowrap muted-2">{shortDate(t.txn_date)}</td>
                   <td><Link to={txnPath(t.id)}>{t.description}</Link></td>
-                  <td>
+                  <td className="hide-sm">
                     {t.category_id
                       ? <Link to={categoryPath(t.category_id)} className="tag tag-neutral">{t.category_name}</Link>
                       : <span className="tag tag-neutral">Uncategorized</span>}
@@ -143,6 +145,8 @@ export function Dashboard() {
               )}
             </tbody>
           </table>
+          </div>
+          </div>
         </Card>
         <Card>
           <div className="card-kicker">Accounts</div>

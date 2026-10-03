@@ -1,10 +1,11 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { get, type AccountDetail } from '../api'
+import { get, put, type AccountDetail } from '../api'
 import { CashflowChart, Legend } from '../components/Charts'
 import { LineChart } from '../components/LineChart'
-import { Breakdown, Findings, Kpis, RangeSeg, TableCard, TxnList, YearTable } from '../components/Detail'
-import { Card, ErrorNote } from '../components/ui'
+import { Breakdown, Findings, Kpis, RangeSeg, RenameCard, TableCard, TxnList, YearTable } from '../components/Detail'
+import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, rangeLabel, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { merchantPath } from '../links'
@@ -20,6 +21,18 @@ function AccountView({ id }: { id: number }) {
     queryKey: ['details', 'account', id, r.start],
     queryFn: () => get<AccountDetail>(`/accounts/${id}/detail`, { start: r.start }),
     placeholderData: keepPreviousData,
+  })
+  const qc = useQueryClient()
+  const [renaming, setRenaming] = useState(false)
+  const rename = useMutation({
+    mutationFn: (name: string) => {
+      const { id: _id, institution_name: _i, sources: _s, ...rest } = q.data!.account
+      return put(`/accounts/${id}`, { ...rest, name })
+    },
+    onSuccess: () => {
+      setRenaming(false)
+      for (const k of ['details', 'accounts', 'transactions', 'analytics']) qc.invalidateQueries({ queryKey: [k] })
+    },
   })
   const d = q.data
   if (q.error) return <section className="page"><ErrorNote error={q.error} /></section>
@@ -43,8 +56,16 @@ function AccountView({ id }: { id: number }) {
           </div>
           {a.notes && <div className="small muted-2">{a.notes}</div>}
         </div>
-        <RangeSeg value={r.range} onChange={r.setRange} />
+        <div className="row">
+          <RangeSeg value={r.range} onChange={r.setRange} />
+          <Button onClick={() => setRenaming(!renaming)}>Rename</Button>
+        </div>
       </header>
+      <ErrorNote error={rename.error} />
+      {renaming && (
+        <RenameCard initial={a.name} pending={rename.isPending} onSave={rename.mutate} onCancel={() => setRenaming(false)}
+          meta={a.mask ? `The ···${a.mask} suffix is added automatically; don't include it in the name.` : undefined} />
+      )}
 
       <Kpis items={[
         { k: 'Balance', v: d.balance ? money(d.balance.balance) : '—',

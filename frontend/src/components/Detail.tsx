@@ -58,6 +58,24 @@ export function Breakdown({ kicker, rows, to, value, empty = 'Nothing in this ra
 }
 
 /** Full-bleed table card; the scroll wrapper sits inside so the blueprint corners don't trigger scrollbars. */
+export function RenameCard({ initial, pending, onSave, onCancel, meta }: {
+  initial: string; pending: boolean; onSave: (name: string) => void; onCancel: () => void; meta?: ReactNode
+}) {
+  const [draft, setDraft] = useState(initial)
+  const name = draft.trim()
+  return (
+    <Card style={{ gap: 'var(--space-2)' }}>
+      <div className="card-kicker">Rename</div>
+      <form className="row" onSubmit={(e) => { e.preventDefault(); if (name && name !== initial) onSave(name) }}>
+        <input className="input" style={{ flex: 1, minWidth: 220 }} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <Button variant="primary" type="submit" disabled={pending || !name || name === initial}>Save</Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+      </form>
+      {meta && <div className="card-meta">{meta}</div>}
+    </Card>
+  )
+}
+
 export function TableCard({ children, head, foot }: { children: ReactNode; head?: ReactNode; foot?: ReactNode }) {
   return (
     <Card style={{ padding: 0, gap: 0 }}>

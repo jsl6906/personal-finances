@@ -8,8 +8,9 @@ import {
 import { BackfillCard } from '../components/Backfill'
 import { BalanceSparkline } from '../components/LineChart'
 import { Button, Card, ErrorNote } from '../components/ui'
-import { useBalanceTrend, useJob } from '../hooks'
+import { useAccounts, useBalanceTrend, useJob } from '../hooks'
 import { fullDate, money, shortDate } from '../format'
+import { accountPath } from '../links'
 
 const LIABILITIES = ['credit_card', 'loan', 'mortgage']
 
@@ -94,7 +95,6 @@ export function Sources() {
       </div>
 
       <BackfillCard />
-      <Evaluation />
       <BalancesCard />
       <HoldingsCard />
     </section>
@@ -138,7 +138,7 @@ function SourceCard({ kicker, title, source, cost, actions, children }: {
 
 function TillerSetup({ source, serviceAccount }: { source?: DataSource; serviceAccount: string | null }) {
   const qc = useQueryClient()
-  const [open, setOpen] = useState(!source?.connected)
+  const [open, setOpen] = useState(false)
   const [sheet, setSheet] = useState(source?.config.sheet_id ?? '')
   const [days, setDays] = useState(String(source?.config.lookback_days ?? 60))
   const save = useMutation({
@@ -206,35 +206,25 @@ function SimpleFinSetup({ source }: { source?: DataSource }) {
   )
 }
 
-function Evaluation() {
-  const rows = [
-    ['Tiller (current)', 'Google Sheet kept current by Tiller; read here through a service account.', 'Existing subscription', 'Broad bank coverage, you already categorize there', 'Sheet is the middleman; no holdings detail'],
-    ['SimpleFIN Bridge', 'Direct pull of accounts, balances, transactions and some holdings.', '~$15/year', 'Cheap, built for personal apps, no sheet needed', 'Up to 90 days per pull; coverage varies by bank'],
-    ['Plaid / Yodlee', 'Commercial aggregation APIs.', 'Per-connection pricing', 'Best coverage', 'Production access requires an application and security review aimed at businesses; not practical for a household app'],
-  ]
-  return (
-    <Card style={{ padding: 0, gap: 0 }}>
-      <div style={{ padding: 'var(--space-3) var(--space-4) 0' }}>
-        <div className="card-kicker">Evaluation</div>
-        <div className="card-title">Automated bank data options</div>
-      </div>
-      <div style={{ overflowX: 'auto' }}><table className="table">
-        <thead><tr><th>Option</th><th>What it is</th><th>Cost</th><th>Pros</th><th>Cons</th></tr></thead>
-        <tbody>{rows.map((r) => <tr key={r[0]}>{r.map((c, i) => <td key={i} className={i === 0 ? 'nowrap' : 'small'}>{c}</td>)}</tr>)}</tbody>
-      </table></div>
-      <div className="small text-muted" style={{ padding: '0 var(--space-4) var(--space-3)' }}>
-        Recommendation: keep Tiller while it's paid for and connect SimpleFIN alongside it; both feeds are de-duplicated against each
-        other, so you can compare coverage before letting the Tiller subscription lapse.
-      </div>
-    </Card>
-  )
-}
-
 function BalancesCard() {
   const q = useQuery({ queryKey: ['balances'], queryFn: () => get<Balances>('/balances') })
+  const accounts = useAccounts()
   const trend = useBalanceTrend()
   const b = q.data
-  if (!b || b.accounts.length === 0) return null
+  if (!b || b.accounts.length === 0 || !accounts.data) return null
+  const balanceBy = new Map(b.accounts.map((row) => [row.account_id, row]))
+  const accountGroups = new Map<string, { account: (typeof accounts.data)[number]; balance: (typeof b.accounts)[number]; signed: number }[]>()
+  for (const account of accounts.data) {
+    const balance = balanceBy.get(account.id)
+    if (account.is_closed || account.is_hidden || !balance || !Number(balance.balance)) continue
+    const signed = LIABILITIES.includes(account.account_type) ? -Math.abs(Number(balance.balance)) : Number(balance.balance)
+    const rows = accountGroups.get(account.account_type) ?? []
+    rows.push({ account, balance, signed })
+    accountGroups.set(account.account_type, rows)
+  }
+  const groupedAccounts = [...accountGroups.entries()]
+    .map(([type, rows]) => ({ type, rows: rows.sort((a, b) => b.signed - a.signed), total: rows.reduce((sum, row) => sum + row.signed, 0) }))
+    .sort((a, b) => b.total - a.total)
   return (
     <Card style={{ padding: 0, gap: 0 }}>
       <div className="row" style={{ padding: 'var(--space-3) var(--space-4) 0', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -242,27 +232,40 @@ function BalancesCard() {
         <div className="small text-muted">Assets {money(b.assets)} · Liabilities {money(b.liabilities)}</div>
       </div>
       <div style={{ overflowX: 'auto' }}><table className="table">
-        <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th className="num">Balance</th><th className="hide-sm">Last 24 months</th><th className="num">30-day change</th><th>As of</th><th>Source</th></tr></thead>
-        <tbody>
-          {b.accounts.map((a) => {
-            const signed = (v: number) => (LIABILITIES.includes(a.account_type) ? -Math.abs(v) : v)
-            const change = a.balance_30d_ago === null ? null : signed(a.balance) - signed(a.balance_30d_ago)
-            return (
-              <tr key={a.account_id}>
-                <td>{a.account}</td>
-                <td className="text-muted">{a.institution ?? '—'}</td>
-                <td className="text-muted">{a.account_type.replace('_', ' ')}</td>
-                <td className="num">{money(signed(a.balance))}</td>
-                <td className="hide-sm">
-                  <BalanceSparkline points={trend.data?.[a.account_id]} liability={LIABILITIES.includes(a.account_type)} />
-                </td>
-                <td className="num text-muted">{change === null ? '—' : money(change, true)}</td>
-                <td className="nowrap text-muted">{fullDate(a.as_of)}</td>
-                <td className="text-muted">{a.source}</td>
-              </tr>
-            )
-          })}
-        </tbody>
+        <thead><tr><th>Account</th><th>Institution</th><th className="num">Balance</th><th className="hide-sm">Last 24 months</th><th className="num">30-day change</th><th>As of</th><th>Source</th></tr></thead>
+        {groupedAccounts.map(({ type, rows, total }) => (
+          <tbody key={type}>
+            <tr className="group-row">
+              <td colSpan={2}>{type.replace('_', ' ')}</td>
+              <td className="num">{money(total)}</td>
+              <td className="hide-sm" />
+              <td />
+              <td />
+              <td />
+            </tr>
+            {rows.map(({ account, balance, signed }) => {
+              const change = balance.balance_30d_ago === null
+                ? null
+                : signed - (LIABILITIES.includes(account.account_type) ? -Math.abs(balance.balance_30d_ago) : balance.balance_30d_ago)
+              return (
+                <tr key={account.id}>
+                  <td><Link to={accountPath(account.id)}>{account.name}{account.mask ? ` ···${account.mask}` : ''}</Link></td>
+                  <td className="text-muted">{account.institution_name ?? balance.institution ?? '—'}</td>
+                  <td className="num">{money(signed)}</td>
+                  <td className="hide-sm">
+                    <BalanceSparkline points={trend.data?.[account.id]} liability={LIABILITIES.includes(account.account_type)} />
+                  </td>
+                  <td className="num text-muted">{change === null ? '—' : money(change, true)}</td>
+                  <td className="nowrap text-muted">{fullDate(balance.as_of)}</td>
+                  <td className="text-muted">{balance.source}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        ))}
+        {groupedAccounts.length === 0 && (
+          <tbody><tr><td colSpan={7} className="text-muted">No accounts with a balance yet.</td></tr></tbody>
+        )}
       </table></div>
     </Card>
   )

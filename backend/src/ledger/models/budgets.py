@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Numeric, SmallInteger, String, Text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Numeric, SmallInteger, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ledger.db.base import Base, TimestampMixin
@@ -10,12 +10,21 @@ PERIOD_MONTHS = {"month": 1, "quarter": 3, "year": 12}
 
 
 class Budget(TimestampMixin, Base):
-    """Budget for one category or one category group, expressed per month, quarter or year."""
+    """Budget for one category, one category group, or all spending (both targets NULL), per month/quarter/year.
+
+    A group or overall budget is shown net of the narrower budgets inside it ("everything else").
+    """
 
     __tablename__ = "budget"
     __table_args__ = (
-        CheckConstraint("(category_id IS NULL) <> (group_id IS NULL)", name="one_target"),
+        CheckConstraint("NOT (category_id IS NOT NULL AND group_id IS NOT NULL)", name="one_target"),
         CheckConstraint("period_type IN ('month', 'quarter', 'year')", name="period_type"),
+        Index(
+            "uq_budget_overall",
+            text("(true)"),
+            unique=True,
+            postgresql_where=text("category_id IS NULL AND group_id IS NULL"),
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("category.id", ondelete="CASCADE"), unique=True)

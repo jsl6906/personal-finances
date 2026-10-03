@@ -50,7 +50,7 @@ export function monthName(d: Date): string {
   return LONG_MONTHS[d.getMonth()]
 }
 
-export type PeriodKey = 'this_month' | 'last_month' | 'last_90' | 'this_year' | 'last_year' | 'all'
+export type PeriodKey = 'this_month' | 'last_month' | 'last_90' | 'this_year' | 'last_year' | 'all' | 'custom'
 
 export const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'this_month', label: 'This month' },
@@ -59,6 +59,7 @@ export const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'this_year', label: 'This year' },
   { key: 'last_year', label: 'Last year' },
   { key: 'all', label: 'All time' },
+  { key: 'custom', label: 'Custom range' },
 ]
 
 export function periodRange(key: PeriodKey, today = new Date()): { start?: string; end?: string } {

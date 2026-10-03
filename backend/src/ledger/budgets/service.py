@@ -94,6 +94,9 @@ def _q(v: Decimal) -> Decimal:
     return v.quantize(Decimal("0.01"))
 
 
+OVERALL_NAME = "All spending"
+
+
 async def budget_status(session: AsyncSession, period: Period, today: date) -> dict:
     cats = {c.id: c for c in (await session.scalars(select(Category))).unique().all()}
     groups = {g.id: g for g in (await session.scalars(select(CategoryGroup))).all()}
@@ -101,20 +104,45 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
     act = await actuals(session, period.start, period.end)
     elapsed = period.elapsed(today)
 
+    def in_period(b: Budget) -> Decimal:
+        return _q(b.amount * period.months / PERIOD_MONTHS[b.period_type])
+
+    cat_budgets = [b for b in budgets if b.category_id]
+    group_budgets = {b.group_id: b for b in budgets if b.group_id}
     rows, covered = [], set()
     for b in budgets:
+        # Wider budgets are shown net of the narrower budgets (and their spending) inside them.
+        sub: list[Budget] = []
         if b.category_id:
             members = [b.category_id]
             c = cats[b.category_id]
-            name, group, kind = c.name, c.group.name, c.type
-        else:
+            name, group, kind, scope = c.name, c.group.name, c.type, "category"
+        elif b.group_id:
             members = [cid for cid, c in cats.items() if c.group_id == b.group_id]
             g = groups[b.group_id]
-            name, group, kind = g.name, None, g.type
+            sub = [x for x in cat_budgets if cats[x.category_id].group_id == b.group_id]
+            name, group, kind, scope = (f"{g.name} · everything else" if sub else g.name), None, g.type, "group"
+        else:
+            members = [
+                cid
+                for cid, c in cats.items()
+                if c.type == "expense" and not c.hide_from_reports and not c.group.hide_from_reports
+            ]
+            sub = [x for x in group_budgets.values() if groups[x.group_id].type == "expense"] + [
+                x
+                for x in cat_budgets
+                if cats[x.category_id].type == "expense" and cats[x.category_id].group_id not in group_budgets
+            ]
+            name, group, kind, scope = ("Everything else" if sub else OVERALL_NAME), None, "expense", "overall"
+        excluded = {x.category_id for x in sub if x.category_id}
+        excluded.update(cid for cid, c in cats.items() if c.group_id in {x.group_id for x in sub if x.group_id})
+        members = [m for m in members if m not in excluded]
         net = sum((act.get(c, (Decimal(0), Decimal(0)))[0] for c in members), Decimal(0))
         spread = sum((act.get(c, (Decimal(0), Decimal(0)))[1] for c in members), Decimal(0))
         actual = -net if kind != "income" else net
-        budget = _q(b.amount * period.months / PERIOD_MONTHS[b.period_type])
+        total_budget = in_period(b)
+        allocated = sum((in_period(x) for x in sub), Decimal(0))
+        budget = total_budget - allocated
         if kind == "expense":
             covered.update(members)
         projected = _q(actual / Decimal(str(elapsed))) if 0 < elapsed < 1 else _q(actual)
@@ -123,22 +151,25 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
                 "budget_id": b.id,
                 "category_id": b.category_id,
                 "group_id": b.group_id,
+                "scope": scope,
                 "name": name,
                 "group": group,
                 "kind": kind,
                 "period_type": b.period_type,
                 "base_amount": b.amount,
+                "total_budget": total_budget,
+                "allocated": allocated,
                 "budget": budget,
                 "actual": _q(actual),
                 "left": _q(budget - actual),
-                "pct": float(actual / budget * 100) if budget else 0.0,
+                "pct": float(actual / budget * 100) if budget > 0 else 0.0,
                 "projected": projected,
                 "spread_amount": _q(abs(spread)),
                 "notes": b.notes,
                 "status": "over" if actual > budget else ("pace" if projected > budget else "ok"),
             }
         )
-    rows.sort(key=lambda r: (r["kind"] != "expense", -r["pct"]))
+    rows.sort(key=lambda r: (r["kind"] != "expense", r["scope"] == "overall", -r["pct"]))
 
     expense_rows = [r for r in rows if r["kind"] == "expense"]
     spent_total = -sum((act.get(c, (Decimal(0), Decimal(0)))[0] for c in covered), Decimal(0))

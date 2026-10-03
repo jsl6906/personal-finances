@@ -41,6 +41,18 @@ async def test_duplicate_name_conflict(client, refs):
     assert r.status_code == 409
 
 
+async def test_category_rename_keeps_alias(client, refs):
+    group_id = refs["cats"]["Water"]["group_id"]
+    cat = (await client.post("/api/categories", json={"name": "Renamable Api", "group_id": group_id})).json()
+    body = {k: cat[k] for k in ("group_id", "type", "hide_from_reports", "is_active", "description")}
+    r = await client.put(f"/api/categories/{cat['id']}", json=body | {"name": "Renamed Api"})
+    assert r.status_code == 200 and r.json()["name"] == "Renamed Api"
+    aliases = {a["alias"]: a["category_id"] for a in (await client.get("/api/category-aliases")).json()}
+    assert aliases["renamable api"] == cat["id"]
+    # renaming again (or a no-op save) must not fail on the existing alias
+    assert (await client.put(f"/api/categories/{cat['id']}", json=body | {"name": "Renamed Api"})).status_code == 200
+
+
 async def test_transaction_crud_and_rule_learning(client, refs):
     acct_id = refs["acct"]["id"]
     groceries = refs["cats"]["Groceries"]["id"]

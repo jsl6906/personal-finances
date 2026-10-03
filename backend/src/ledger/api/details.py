@@ -291,6 +291,7 @@ async def account_detail(
         "account": {
             "id": a.id,
             "name": a.name,
+            "institution_id": a.institution_id,
             "institution_name": a.institution.name if a.institution else None,
             "account_type": a.account_type,
             "mask": a.mask,

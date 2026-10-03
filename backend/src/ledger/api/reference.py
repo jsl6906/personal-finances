@@ -7,6 +7,7 @@ from ledger.db.engine import get_session
 from ledger.models import (
     Account,
     Category,
+    CategoryAlias,
     CategoryGroup,
     HouseholdMember,
     Institution,
@@ -217,8 +218,14 @@ async def create_category(body: CategoryIn, session: AsyncSession = Depends(get_
 async def update_category(obj_id: int, body: CategoryIn, session: AsyncSession = Depends(get_session)):
     obj = await _get(session, Category, obj_id)
     await _get(session, CategoryGroup, body.group_id)
+    old = obj.name.strip().lower()
     for k, v in body.model_dump().items():
         setattr(obj, k, v)
+    # imports map category labels by name; keep the old label mapping here
+    if body.name.strip().lower() != old and not await session.scalar(
+        select(CategoryAlias.id).where(CategoryAlias.alias == old)
+    ):
+        session.add(CategoryAlias(alias=old, category_id=obj_id))
     await _commit(session)
     await session.refresh(obj, ["group"])
     return _category_out(obj)

@@ -9,6 +9,7 @@ from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
 from ledger.models import DuplicatePair, Transaction, TransactionNote, TransactionSource
 from ledger.schemas import JobOut, PairDecisionIn, ScanIn, TxnPairOut
+from ledger.services.dedupe import other_description
 
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
 
@@ -88,6 +89,10 @@ async def decide(pair_id: int, body: PairDecisionIn, session: AsyncSession = Dep
             keep.category_rule_id = drop.category_rule_id
         if drop.notes and drop.notes not in (keep.notes or ""):
             keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
+        other = other_description(drop.description, keep.description, keep.original_description)
+        if other and other not in (keep.notes or ""):
+            line = f"Also described as: {other}"
+            keep.notes = f"{keep.notes}\n{line}" if keep.notes else line
         keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())
         await session.execute(
             update(TransactionSource)

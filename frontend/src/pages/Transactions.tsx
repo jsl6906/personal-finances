@@ -23,6 +23,8 @@ export function Transactions() {
   const q = useDebounced(search)
   const [status, setStatus] = useState<Status>('all')
   const [period, setPeriod] = useState<PeriodKey>(batchId || ruleId || searchParams.get('q') ? 'all' : 'last_90')
+  const [dateStart, setDateStart] = useState('')
+  const [dateEnd, setDateEnd] = useState('')
   const [accountId, setAccountId] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState<number | null>(() =>
     searchParams.get('category') ? Number(searchParams.get('category')) : null)
@@ -33,7 +35,9 @@ export function Transactions() {
   const [jobId, setJobId] = useState<number | null>(null)
   const [bulkPrompt, setBulkPrompt] = useState<{ txn: Transaction; categoryId: number } | { done: string } | null>(null)
 
-  const range = periodRange(period)
+  const range = period === 'custom'
+    ? { start: dateStart || undefined, end: dateEnd || undefined }
+    : periodRange(period)
   const params = {
     q, status, ...range, account_id: accountId ?? undefined, category_id: categoryId ?? undefined, limit: PAGE, offset,
     import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
@@ -144,6 +148,12 @@ export function Transactions() {
         <select className="input compact" value={period} onChange={(e) => onFilter(setPeriod)(e.target.value as PeriodKey)}>
           {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
+        {period === 'custom' && <>
+          <input className="input compact" type="date" aria-label="Start date" value={dateStart}
+            max={dateEnd || undefined} onChange={(e) => onFilter(setDateStart)(e.target.value)} />
+          <input className="input compact" type="date" aria-label="End date" value={dateEnd}
+            min={dateStart || undefined} onChange={(e) => onFilter(setDateEnd)(e.target.value)} />
+        </>}
         <select className="input compact" value={accountId ?? ''}
           onChange={(e) => onFilter(setAccountId)(e.target.value ? Number(e.target.value) : null)}>
           <option value="">All accounts</option>

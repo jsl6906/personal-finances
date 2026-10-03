@@ -6,12 +6,11 @@ import {
   type ImportPair, type ImportRow, type StatementAccount,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
-import { PairReview } from '../components/PairReview'
-import { Button, Card, ErrorNote, Field, ProgressBar } from '../components/ui'
+import { Button, Card, ErrorNote, Field, ProgressBar, Seg } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { txnPath } from '../links'
 import { useAccounts, useJob, useMembers, useTags } from '../hooks'
-import { ORIGINS, STATUS_TAG, briefFacts, pairConfidence } from '../review'
+import { ORIGINS, STATUS_TAG, pairConfidence } from '../review'
 import { Steps } from './Import'
 
 const DATE_FORMATS = [
@@ -542,63 +541,143 @@ function DocMetaCard({ b }: { b: BatchDetail }) {
   )
 }
 
+type Filter = 'all' | 'pending' | 'skip_duplicate' | 'keep'
+const DECISION_LABEL: Record<string, string> = { pending: 'Undecided', skip_duplicate: 'Skip incoming', keep: 'Keep both' }
+
 function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void }) {
   const qc = useQueryClient()
   const pairs = useQuery({ queryKey: ['import', b.id, 'pairs'], queryFn: () => get<ImportPair[]>(`/imports/${b.id}/duplicates`) })
+  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [filter, setFilter] = useState<Filter | null>(null)
   const decide = useMutation({
-    mutationFn: ({ rowId, decision }: { rowId: number; decision: string }) =>
-      post(`/imports/${b.id}/rows/${rowId}/decision`, { decision }),
-    onSuccess: () => {
+    mutationFn: ({ rowIds, decision }: { rowIds: number[]; decision: string }) =>
+      post<BatchDetail>(`/imports/${b.id}/rows/decisions`, { row_ids: rowIds, decision }),
+    onSuccess: (nb) => {
+      qc.setQueryData(['import', b.id], nb)
       qc.invalidateQueries({ queryKey: ['import', b.id, 'pairs'] })
+      setChecked(new Set())
       onChanged()
     },
   })
   const list = pairs.data ?? []
   const open = list.filter((p) => p.row.decision === 'pending')
-  const cur = open[0]
   const exact = b.stats.exact_duplicates ?? 0
   const skipped = list.filter((p) => p.row.decision === 'skip_duplicate').length
   const kept = list.filter((p) => p.row.decision === 'keep').length
+  const active: Filter = filter ?? (open.length ? 'pending' : 'all')
+  const shown = active === 'all' ? list : list.filter((p) => p.row.decision === active)
+  const shownIds = shown.map((p) => p.row.id)
+  const allChecked = shownIds.length > 0 && shownIds.every((id) => checked.has(id))
+  const toggle = (id: number) => setChecked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const act = (rowIds: number[], decision: string) => rowIds.length && decide.mutate({ rowIds, decision })
 
   if (pairs.isLoading) return null
+  if (!list.length) {
+    return (
+      <Card style={{ maxWidth: 560, gap: 'var(--space-2)' }}>
+        <div className="card-kicker">Duplicate review</div>
+        <div className="card-title">No possible duplicates to review</div>
+        {exact > 0 && <div className="small text-muted">{exact} exact duplicates of existing transactions were skipped automatically.</div>}
+      </Card>
+    )
+  }
   return (
     <div className="stack-3">
-      {exact > 0 && <div className="small text-muted">{exact} exact duplicates of existing transactions were skipped automatically.</div>}
-      {cur ? (
-        <PairReview
-          kicker={`Potential duplicate ${list.length - open.length + 1} of ${list.length}`}
-          title={`${cur.existing.description} · ${shortDate(cur.row.txn_date)}`}
-          confidence={pairConfidence(cur.score, cur.ai_probability)}
-          left={{ kicker: `Incoming · ${b.filename}`, description: cur.row.description, amount: cur.row.amount,
-            facts: [['Date', fullDate(cur.row.txn_date)], ['Account', cur.row.account_name ?? cur.row.account_hint ?? '—'],
-              ['Row', String(cur.row.row_index + 1)]] }}
-          right={{ kicker: 'Already in ledger', description: cur.existing.description, amount: cur.existing.amount,
-            facts: briefFacts(cur.existing) }}
-          reason={cur.ai_reason ? `${cur.ai_reason} (${cur.reasons.join(' · ')})` : cur.reasons.join(' · ')}
-          note="“Keep both” is remembered; this pair won't be flagged again."
-          actions={<>
-            <Button variant="primary" disabled={decide.isPending}
-              onClick={() => decide.mutate({ rowId: cur.row.id, decision: 'skip_duplicate' })}>Same transaction — skip incoming</Button>
-            <Button disabled={decide.isPending} onClick={() => decide.mutate({ rowId: cur.row.id, decision: 'keep' })}>
-              Different — keep both
+      <div className="row" style={{ alignItems: 'baseline', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <div>
+          <div className="card-title" style={{ margin: 0 }}>
+            {open.length ? `${open.length} of ${list.length} possible duplicates undecided` : `All ${list.length} candidates decided`}
+          </div>
+          <div className="small text-muted">
+            {skipped} to skip as duplicates · {kept} kept as separate
+            {exact > 0 && ` · ${exact} exact duplicates skipped automatically`}.
+            {' '}“Keep both” is remembered; those pairs won't be flagged again. Undecided rows are skipped at commit.
+          </div>
+        </div>
+        <span className="spacer" />
+        <Seg<Filter> name="dupfilter" value={active} onChange={(v) => { setFilter(v); setChecked(new Set()) }}
+          options={[
+            { value: 'pending', label: `Undecided (${open.length})` }, { value: 'skip_duplicate', label: `Skip (${skipped})` },
+            { value: 'keep', label: `Keep (${kept})` }, { value: 'all', label: `All (${list.length})` },
+          ]} />
+      </div>
+
+      <div className="bulk-bar">
+        {checked.size > 0 ? (
+          <>
+            <strong>{checked.size} selected</strong>
+            <Button variant="primary" disabled={decide.isPending} onClick={() => act([...checked], 'skip_duplicate')}>
+              Same transaction — skip incoming
             </Button>
-          </>}
-        />
-      ) : (
-        <Card style={{ maxWidth: 560, gap: 'var(--space-2)' }}>
-          <div className="card-kicker">Duplicate review</div>
-          <div className="card-title">{list.length ? `All ${list.length} candidates decided` : 'No possible duplicates to review'}</div>
-          {list.length > 0 && <div>{skipped} skipped as duplicates, {kept} kept as separate and remembered.</div>}
-          {list.length > 0 && (
-            <Button variant="ghost" style={{ alignSelf: 'flex-start' }} disabled={decide.isPending}
-              onClick={async () => {
-                for (const p of list) await post(`/imports/${b.id}/rows/${p.row.id}/decision`, { decision: 'pending' })
-                qc.invalidateQueries({ queryKey: ['import', b.id, 'pairs'] })
-                onChanged()
-              }}>Start over</Button>
-          )}
-        </Card>
-      )}
+            <Button disabled={decide.isPending} onClick={() => act([...checked], 'keep')}>Different — keep both</Button>
+            <Button variant="ghost" disabled={decide.isPending} onClick={() => act([...checked], 'pending')}>Reset to undecided</Button>
+            <span className="spacer" />
+            <Button variant="ghost" onClick={() => setChecked(new Set())}>Clear selection</Button>
+          </>
+        ) : (
+          <>
+            <span>Select rows to decide them together, or apply to all {active === 'all' ? '' : `${DECISION_LABEL[active].toLowerCase()} `}rows shown:</span>
+            <Button disabled={decide.isPending || !shownIds.length} onClick={() => act(shownIds, 'skip_duplicate')}>
+              Skip all shown as duplicates
+            </Button>
+            <Button disabled={decide.isPending || !shownIds.length} onClick={() => act(shownIds, 'keep')}>Keep all shown</Button>
+            {active !== 'pending' && (
+              <Button variant="ghost" disabled={decide.isPending || !shownIds.length} onClick={() => act(shownIds, 'pending')}>
+                Reset shown to undecided
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+
+      <Card className="table-card">
+        <table className="table" style={{ fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th className="check">
+                <input type="checkbox" checked={allChecked}
+                  onChange={() => setChecked(allChecked ? new Set() : new Set(shownIds))} />
+              </th>
+              <th>Row</th><th>Incoming · {b.filename}</th><th style={{ textAlign: 'right' }}>Amount</th>
+              <th>Already in ledger</th><th>Match</th><th>Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((p) => {
+              const reason = p.ai_reason ? `${p.ai_reason} (${p.reasons.join(' · ')})` : p.reasons.join(' · ')
+              const sameDesc = (p.row.description ?? '').trim().toLowerCase() === p.existing.description.trim().toLowerCase()
+              return (
+                <tr key={p.id} className={checked.has(p.row.id) ? 'selected' : undefined}>
+                  <td className="check"><input type="checkbox" checked={checked.has(p.row.id)} onChange={() => toggle(p.row.id)} /></td>
+                  <td className="text-muted nowrap">{p.row.row_index + 1}</td>
+                  <td>
+                    <div style={{ fontWeight: 500 }}>{p.row.description}</div>
+                    <div className="small text-muted nowrap">{shortDate(p.row.txn_date)} · {p.row.account_name ?? p.row.account_hint ?? 'No account'}</div>
+                  </td>
+                  <td className="num nowrap">{money(p.row.amount)}</td>
+                  <td>
+                    <Link to={txnPath(p.existing.id)} style={sameDesc ? undefined : { fontWeight: 500 }}>{p.existing.description}</Link>
+                    <div className="small text-muted nowrap">
+                      {shortDate(p.existing.txn_date)} · {p.existing.account_name ?? 'No account'} · {money(p.existing.amount)} · via {p.existing.source_type}
+                    </div>
+                  </td>
+                  <td className="small" title={reason}>
+                    <div className="nowrap">{pairConfidence(p.score, p.ai_probability)}</div>
+                    <div className="text-muted" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reason}</div>
+                  </td>
+                  <td className="nowrap">
+                    <select className="input" style={{ minWidth: 130 }} value={p.row.decision} disabled={decide.isPending}
+                      onChange={(e) => act([p.row.id], e.target.value)}>
+                      {Object.entries(DECISION_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              )
+            })}
+            {!shown.length && <tr><td colSpan={7} className="text-muted">Nothing in this view.</td></tr>}
+          </tbody>
+        </table>
+      </Card>
       <ErrorNote error={decide.error || pairs.error} />
     </div>
   )

@@ -144,6 +144,54 @@ async def test_spreadsheet_import_flow(client, setup, monkeypatch):
     assert page["total"] == 0
 
 
+async def test_bulk_decisions_and_description_notes(client, setup, monkeypatch):
+    import ledger.jobs.worker as worker
+
+    async def no_progress(self, fraction, message=None):
+        return None
+
+    monkeypatch.setattr(worker.JobContext, "progress", no_progress)
+    acct = setup["acct"]["id"]
+    existing = {}
+    for desc, day in (("Shell Oil", "03"), ("Panera Bread", "04"), ("Lowes Home Improvement", "05")):
+        r = await client.post(
+            "/api/transactions",
+            json={"txn_date": f"2026-08-{day}", "description": desc, "amount": "-41.77", "account_id": acct},
+        )
+        existing[desc] = r.json()["id"]
+    csv = (
+        "Transaction Date,Post Date,Description,Category,Amount\n"
+        "08/03/2026,08/03/2026,SHELL SERVICE 57442101,,-41.77\n"
+        "08/04/2026,08/04/2026,PANERA CAFE #601234,,-41.77\n"
+        "08/06/2026,08/06/2026,Lowes  Home Improvement,,-41.77\n"
+    )
+    b = (await client.post("/api/imports", files={"file": ("bulk.csv", csv.encode(), "text/csv")})).json()
+    await client.post(f"/api/imports/{b['id']}/prepare", json={"mapping": b["mapping"], "defaults": {"account_id": acct}})
+    stats = await _run("prepare_import", {"batch_id": b["id"]})
+    assert stats["possible_duplicates"] == 3
+    pairs = (await client.get(f"/api/imports/{b['id']}/duplicates")).json()
+    by_desc = {p["existing"]["description"]: p for p in pairs}
+    assert set(by_desc) == set(existing)
+
+    # One call decides many rows; invalid/foreign ids are ignored.
+    url = f"/api/imports/{b['id']}/rows/decisions"
+    skip_ids = [by_desc["Shell Oil"]["row"]["id"], by_desc["Lowes Home Improvement"]["row"]["id"]]
+    r = await client.post(url, json={"row_ids": [*skip_ids, 999999], "decision": "skip_duplicate"})
+    assert r.status_code == 200 and r.json()["decisions"] == {"skip_duplicate": 2, "pending": 1}
+    r = await client.post(url, json={"row_ids": [by_desc["Panera Bread"]["row"]["id"]], "decision": "keep"})
+    assert r.json()["decisions"] == {"skip_duplicate": 2, "keep": 1}
+    assert (await client.post(url, json={"row_ids": [], "decision": "keep"})).status_code == 422
+
+    d = (await client.post(f"/api/imports/{b['id']}/commit", json={})).json()
+    assert d["stats"]["inserted"] == 1 and d["stats"]["linked_to_existing"] == 2
+
+    # A merged duplicate whose description differs leaves that description as a note; same-text ones don't.
+    notes = (await client.get(f"/api/transactions/{existing['Shell Oil']}/notes")).json()
+    assert [(n["body"], n["source"]) for n in notes] == [("Also described as: SHELL SERVICE 57442101", "import")]
+    assert (await client.get(f"/api/transactions/{existing['Lowes Home Improvement']}/notes")).json() == []
+    assert (await client.get(f"/api/transactions/{existing['Panera Bread']}/notes")).json() == []
+
+
 async def test_document_import_with_mocked_extraction(client, setup, monkeypatch):
     import ledger.jobs.worker as worker
     from ledger.ai import imports as ai_imports

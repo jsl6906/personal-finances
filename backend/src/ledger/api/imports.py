@@ -1,11 +1,12 @@
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.config import get_settings
 from ledger.db.engine import get_session
+from ledger.db.filters import id_in
 from ledger.imports.service import (
     ImportError_,
     commit_batch,
@@ -30,6 +31,7 @@ from ledger.schemas import (
     BatchDetail,
     BatchSource,
     BatchSummary,
+    BulkDecisionIn,
     CommitIn,
     DecisionIn,
     ImportPairOut,
@@ -281,6 +283,20 @@ async def decide_row(batch_id: int, row_id: int, body: DecisionIn, session: Asyn
     await session.commit()
     accounts, categories = await _names(session)
     return _row_out(row, accounts, categories)
+
+
+@router.post("/imports/{batch_id}/rows/decisions", response_model=BatchDetail)
+async def decide_rows(batch_id: int, body: BulkDecisionIn, session: AsyncSession = Depends(get_session)):
+    b = await _batch(session, batch_id)
+    if b.status != "review":
+        raise HTTPException(409, f"Import is {b.status}")
+    await session.execute(
+        update(ImportRow)
+        .where(ImportRow.batch_id == batch_id, id_in(ImportRow.id, body.row_ids), ImportRow.decision != "invalid")
+        .values(decision=body.decision)
+    )
+    await session.commit()
+    return await _detail(session, await _batch(session, batch_id))
 
 
 @router.post("/imports/{batch_id}/commit", response_model=BatchDetail)
