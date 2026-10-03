@@ -10,6 +10,7 @@ from ledger.models.imports import (
     ImportBatch,
     ImportMappingTemplate,
     ImportRow,
+    StatementCheck,
 )
 from ledger.models.reference import (
     Account,
@@ -58,6 +59,7 @@ __all__ = [
     "Source",
     "SpreadRule",
     "Statement",
+    "StatementCheck",
     "StatementSeries",
     "StatementUsage",
     "Tag",

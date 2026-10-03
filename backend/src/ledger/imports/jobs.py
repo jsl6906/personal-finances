@@ -49,6 +49,15 @@ async def prepare_import_job(ctx: JobContext) -> dict:
         raise
 
 
+@job_handler("statement_checks")
+async def statement_checks_job(ctx: JobContext) -> dict:
+    from ledger.imports.coverage import check_all
+
+    async with get_sessionmaker()() as session:
+        await ctx.progress(0.01, "Comparing statements with the ledger")
+        return await check_all(session, progress=ctx.progress)
+
+
 @job_handler("dup_scan")
 async def dup_scan_job(ctx: JobContext) -> dict:
     async with get_sessionmaker()() as session:

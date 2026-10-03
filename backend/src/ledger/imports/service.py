@@ -33,6 +33,7 @@ from ledger.models import (
     ImportMappingTemplate,
     ImportRow,
     Institution,
+    StatementCheck,
     Tag,
     Transaction,
     TransactionNote,
@@ -359,6 +360,38 @@ async def save_template(session: AsyncSession, batch: ImportBatch, name: str) ->
 
 
 # ---------- commit / rollback ----------
+async def transaction_factory(session: AsyncSession, batch: ImportBatch):
+    """A function turning one of the batch's rows into a new (unsaved) Transaction with the batch defaults."""
+    d = batch.defaults
+    tags = (await session.scalars(select(Tag).where(Tag.id.in_(d.get("tag_ids") or [])))).all()
+    source = batch.origin if batch.origin in ("backfill", "tiller", "simplefin") else batch.source_type
+    merchant_aliases = await alias_map(session)
+
+    def make(r: ImportRow, account_id: int | None = None) -> Transaction:
+        t = Transaction(
+            account_id=account_id or r.account_id,
+            txn_date=r.txn_date,
+            posted_date=r.posted_date,
+            description=r.description,
+            original_description=_collect(r.raw, batch.mapping).get("original_description"),
+            merchant=canonical(r.merchant, merchant_aliases),
+            amount=r.amount,
+            category_id=r.category_id,
+            category_source="import" if r.category_id else None,
+            member_id=d.get("member_id"),
+            notes=r.notes,
+            check_number=r.check_number,
+            source_type=source,
+            external_id=r.external_id,
+            fingerprint=fingerprint(account_id, r.txn_date, r.amount, r.description) if account_id else r.fingerprint,
+            import_batch_id=batch.id,
+        )
+        t.tags = list(tags)
+        return t
+
+    return make
+
+
 async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: str = "skip") -> dict:
     if batch.status != "review":
         raise ImportError_(f"Batch is {batch.status}; only reviewed batches can be committed")
@@ -374,32 +407,11 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
             .order_by(ImportRow.row_index)
         )
     ).all()
-    d = batch.defaults
-    tags = (await session.scalars(select(Tag).where(Tag.id.in_(d.get("tag_ids") or [])))).all()
-    source = batch.origin if batch.origin in ("backfill", "tiller", "simplefin") else batch.source_type
     now = datetime.now(UTC)
-    merchant_aliases = await alias_map(session)
+    make = await transaction_factory(session, batch)
     new_txns: list[tuple[ImportRow, Transaction]] = []
     for r in rows:
-        t = Transaction(
-            account_id=r.account_id,
-            txn_date=r.txn_date,
-            posted_date=r.posted_date,
-            description=r.description,
-            original_description=_collect(r.raw, batch.mapping).get("original_description"),
-            merchant=canonical(r.merchant, merchant_aliases),
-            amount=r.amount,
-            category_id=r.category_id,
-            category_source="import" if r.category_id else None,
-            member_id=d.get("member_id"),
-            notes=r.notes,
-            check_number=r.check_number,
-            source_type=source,
-            external_id=r.external_id,
-            fingerprint=r.fingerprint,
-            import_batch_id=batch.id,
-        )
-        t.tags = list(tags)
+        t = make(r)
         session.add(t)
         new_txns.append((r, t))
     await session.flush()
@@ -444,6 +456,10 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
     }
     batch.status, batch.committed_at = "committed", now
     await session.flush()
+    if batch.source_type == "document":
+        from ledger.imports.coverage import save_checks
+
+        await save_checks(session, batch)
     uncategorized = (
         (
             await session.scalars(
@@ -545,6 +561,7 @@ async def rollback_batch(session: AsyncSession, batch: ImportBatch) -> int:
     )
     batch.status = "rolled_back"
     batch.stats = {**batch.stats, "rolled_back": res.rowcount}
+    await session.execute(delete(StatementCheck).where(StatementCheck.import_batch_id == batch.id))
     return res.rowcount
 
 

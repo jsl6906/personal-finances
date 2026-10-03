@@ -207,6 +207,33 @@ export interface ImportPair {
   row: ImportRow; existing: TxnBrief
 }
 
+// ---- statement checks (statement rows vs ledger over the statement period) ----
+export type CheckStatus = 'ok' | 'explained' | 'mismatch' | 'unverified'
+export type CheckFixKind = 'add' | 'remove' | 'amount' | 'link'
+export interface CheckIssue {
+  kind: 'missing' | 'extra' | 'amount' | 'link' | 'edge' | 'elsewhere'; fix: CheckFixKind | null
+  row_id: number | null; transaction_id: number | null
+  row: { row_id: number; row_index: number; date: string; description: string; amount: string } | null
+  txn: { id: number; date: string; description: string; amount: string; source_type: string } | null
+  effect: string; hint: string | null; suggested: boolean
+}
+export interface StatementCheck {
+  import_batch_id: number; account_ref: string; account_id: number | null; account_name: string | null
+  filename: string | null; period_start: string | null; period_end: string | null
+  statement_total: string | null; ledger_total: string | null; difference: string | null
+  statement_rows: number; ledger_rows: number; status: CheckStatus; trusted: boolean | null
+  detail: {
+    issues: CheckIssue[]; shifted: { row: CheckIssue['row']; txn: CheckIssue['txn'] }[]; message?: string
+    totals_match?: boolean; unreadable_rows?: number; period_source?: 'statement' | 'rows'
+  }
+}
+export interface StatementCheckItem extends Omit<StatementCheck, 'detail'> {
+  issue_counts: Record<string, number>; fixes: number; message: string | null; checked_at: string
+}
+export interface StatementCheckList {
+  summary: Partial<Record<CheckStatus, number>>; unchecked: number; job: Job | null; items: StatementCheckItem[]
+}
+
 export interface TxnPair {
   id: number; status: string; score: string; reasons: string[]; ai_probability: string | null; ai_reason: string | null
   a: TxnBrief; b: TxnBrief

@@ -6,6 +6,7 @@ import {
   type ImportPair, type ImportRow, type StatementAccount,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { StatementChecks } from '../components/StatementCheck'
 import { Button, Card, ErrorNote, Field, ProgressBar, Seg } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { txnPath } from '../links'
@@ -733,6 +734,7 @@ function ReviewStep({ b, noAccount, onChooseAccounts }: { b: BatchDetail; noAcco
   const committed = b.status === 'committed'
   const inserted = committed ? b.stats.inserted : (d.insert ?? 0) + (d.keep ?? 0)
   return (
+    <div className="stack-3">
     <div className="grid-main-side">
       <Card style={{ gap: 'var(--space-3)' }}>
         <div className="card-kicker">{committed ? 'Committed' : b.status === 'rolled_back' ? 'Rolled back' : 'Ready to commit'}</div>
@@ -785,6 +787,8 @@ function ReviewStep({ b, noAccount, onChooseAccounts }: { b: BatchDetail; noAcco
         ))}
         {(d.invalid ?? 0) > 0 && <div className="card-meta">Fix the mapping or date format (Back) and re-check, or skip them.</div>}
       </Card>
+    </div>
+    {b.source_type === 'document' && ['review', 'committed'].includes(b.status) && <StatementChecks b={b} />}
     </div>
   )
 }

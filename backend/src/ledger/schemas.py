@@ -369,6 +369,35 @@ class CommitIn(BaseModel):
     pending_as: Literal["skip", "keep"] = "skip"
 
 
+class CheckFix(BaseModel):
+    fix: Literal["add", "remove", "amount", "link"]
+    row_id: int | None = None
+    transaction_id: int | None = None
+
+
+class CheckFixIn(BaseModel):
+    fixes: list[CheckFix] = Field(min_length=1, max_length=2000)
+
+
+class StatementCheckOut(BaseModel):
+    import_batch_id: int
+    account_ref: str
+    account_id: int | None
+    account_name: str | None = None
+    period_start: date | None
+    period_end: date | None
+    statement_total: Decimal | None
+    ledger_total: Decimal | None
+    difference: Decimal | None
+    statement_rows: int
+    ledger_rows: int
+    status: str
+    trusted: bool | None
+    detail: dict
+    filename: str | None = None
+    checked_at: datetime | None = None
+
+
 class SheetIn(BaseModel):
     sheet: str
 

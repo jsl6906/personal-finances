@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ledger.config import get_settings
 from ledger.db.engine import get_session
 from ledger.db.filters import id_in
+from ledger.imports.coverage import ACTIONABLE, account_names, apply_fixes, save_checks
 from ledger.imports.service import (
     ImportError_,
     commit_batch,
@@ -25,6 +26,8 @@ from ledger.models import (
     ImportBatch,
     ImportMappingTemplate,
     ImportRow,
+    Job,
+    StatementCheck,
     Transaction,
 )
 from ledger.schemas import (
@@ -32,12 +35,15 @@ from ledger.schemas import (
     BatchSource,
     BatchSummary,
     BulkDecisionIn,
+    CheckFixIn,
     CommitIn,
     DecisionIn,
     ImportPairOut,
     ImportRowOut,
+    JobOut,
     PrepareIn,
     SheetIn,
+    StatementCheckOut,
     TxnBrief,
 )
 from ledger.sources.backfill import mark_done
@@ -326,6 +332,141 @@ async def rollback_import(batch_id: int, session: AsyncSession = Depends(get_ses
         raise HTTPException(409, str(exc)) from None
     await session.commit()
     return await _detail(session, await _batch(session, batch_id))
+
+
+async def _checks_out(session: AsyncSession, b: ImportBatch, checks: list[dict]) -> list[StatementCheckOut]:
+    names = await account_names(session, [c["account_id"] for c in checks if c["account_id"]])
+    return [
+        StatementCheckOut(
+            **c,
+            import_batch_id=b.id,
+            account_name=names.get(c["account_id"]),
+            filename=b.attachment.filename if b.attachment else None,
+        )
+        for c in checks
+    ]
+
+
+@router.get("/imports/{batch_id}/checks", response_model=list[StatementCheckOut])
+async def batch_checks(batch_id: int, session: AsyncSession = Depends(get_session)):
+    """Compare the statement with the ledger for each of its accounts (recomputed on every call)."""
+    b = await _batch(session, batch_id)
+    checks = await save_checks(session, b)
+    await session.commit()
+    return await _checks_out(session, b, checks)
+
+
+@router.post("/imports/{batch_id}/checks/fix")
+async def fix_batch_checks(batch_id: int, body: CheckFixIn, session: AsyncSession = Depends(get_session)):
+    b = await _batch(session, batch_id)
+    if b.source_type != "document" or b.status not in ("review", "committed"):
+        raise HTTPException(409, "Only reviewed or committed statements can be corrected")
+    result = await apply_fixes(session, b, [f.model_dump() for f in body.fixes])
+    if result["applied"] and b.status == "committed":
+        if result["new_ids"] and get_settings().gemini_key:
+            uncategorized = (
+                await session.scalars(
+                    select(Transaction.id).where(id_in(Transaction.id, result["new_ids"]), Transaction.category_id.is_(None))
+                )
+            ).all()
+            if uncategorized:
+                await enqueue(session, "categorize", {"ids": list(uncategorized)})
+        await enqueue(session, "detect_anomalies", {})
+    await session.commit()
+    notify_worker()
+    b = await _batch(session, batch_id)
+    return {
+        "applied": result["applied"],
+        "skipped": result["skipped"],
+        "checks": await _checks_out(session, b, result["checks"]),
+    }
+
+
+CHECK_JOB = "statement_checks"
+
+
+@router.get("/statement-checks")
+async def list_statement_checks(
+    status: str | None = None, account_id: int | None = None, session: AsyncSession = Depends(get_session)
+):
+    """Stored check results for committed statements, problems first; issue lists are summarized."""
+    base = (
+        select(StatementCheck, Attachment.filename, Account.name)
+        .join(ImportBatch, ImportBatch.id == StatementCheck.import_batch_id)
+        .outerjoin(Attachment, Attachment.id == ImportBatch.attachment_id)
+        .outerjoin(Account, Account.id == StatementCheck.account_id)
+        .where(ImportBatch.status == "committed")
+    )
+    if account_id:
+        base = base.where(StatementCheck.account_id == account_id)
+    summary = dict(
+        (
+            await session.execute(
+                select(StatementCheck.status, func.count())
+                .join(ImportBatch, ImportBatch.id == StatementCheck.import_batch_id)
+                .where(ImportBatch.status == "committed")
+                .group_by(StatementCheck.status)
+            )
+        ).all()
+    )
+    q = base.where(StatementCheck.status == status) if status else base
+    q = q.order_by(StatementCheck.period_start.desc().nulls_last(), StatementCheck.id)
+    items = []
+    for c, filename, name in (await session.execute(q)).all():
+        issues = c.detail.get("issues", [])
+        kinds: dict[str, int] = {}
+        for i in issues:
+            kinds[i["kind"]] = kinds.get(i["kind"], 0) + 1
+        items.append(
+            {
+                "import_batch_id": c.import_batch_id,
+                "account_ref": c.account_ref,
+                "account_id": c.account_id,
+                "account_name": name,
+                "filename": filename,
+                "period_start": c.period_start,
+                "period_end": c.period_end,
+                "statement_total": c.statement_total,
+                "ledger_total": c.ledger_total,
+                "difference": c.difference,
+                "statement_rows": c.statement_rows,
+                "ledger_rows": c.ledger_rows,
+                "status": c.status,
+                "trusted": c.trusted,
+                "issue_counts": kinds,
+                "fixes": sum(1 for i in issues if i["kind"] in ACTIONABLE),
+                "message": c.detail.get("message"),
+                "checked_at": c.checked_at,
+            }
+        )
+    job = await session.scalar(select(Job).where(Job.type == CHECK_JOB).order_by(Job.id.desc()).limit(1))
+    unchecked = await session.scalar(
+        select(func.count())
+        .select_from(ImportBatch)
+        .where(
+            ImportBatch.source_type == "document",
+            ImportBatch.status == "committed",
+            ~select(StatementCheck.id).where(StatementCheck.import_batch_id == ImportBatch.id).exists(),
+        )
+    )
+    return {
+        "summary": summary,
+        "unchecked": unchecked,
+        "job": JobOut.model_validate(job) if job else None,
+        "items": items,
+    }
+
+
+@router.post("/statement-checks/run", response_model=JobOut, status_code=202)
+async def run_statement_checks(session: AsyncSession = Depends(get_session)):
+    busy = await session.scalar(select(Job.id).where(Job.type == CHECK_JOB, Job.status.in_(["queued", "running"])))
+    if busy:
+        raise HTTPException(409, "Statement checks are already running")
+    job = await enqueue(session, CHECK_JOB, {})
+    await session.commit()
+    notify_worker()
+    await session.refresh(job)
+    return job
 
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")

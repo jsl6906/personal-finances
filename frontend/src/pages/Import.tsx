@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { get, post, upload, type BatchDetail, type BatchSummary } from '../api'
 import { Button, Card, ErrorNote, Icon } from '../components/ui'
+import { StatementChecksPanel } from '../components/StatementCheck'
 import { fullDate } from '../format'
 import { STATUS_TAG, STEP_NAMES } from '../review'
 
@@ -117,6 +118,7 @@ export function ImportHome() {
           </tbody>
         </table>
       </Card>
+      <StatementChecksPanel />
     </section>
   )
 }

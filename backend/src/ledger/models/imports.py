@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -145,3 +146,30 @@ class DuplicatePair(Base):
     status: Mapped[str] = mapped_column(String(25), default="pending", server_default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+CHECK_STATUSES = ("ok", "explained", "mismatch", "unverified")
+
+
+class StatementCheck(Base):
+    """An official statement's rows for one account compared with the ledger over the statement period."""
+
+    __tablename__ = "statement_check"
+    __table_args__ = (Index("uq_statement_check_batch_ref", "import_batch_id", "account_ref", unique=True),)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    import_batch_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("import_batch.id", ondelete="CASCADE"))
+    # The statement's own account reference (last4 or name); '' for single-account documents without one.
+    account_ref: Mapped[str] = mapped_column(String(100), default="", server_default="")
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("account.id", ondelete="SET NULL"), index=True)
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    statement_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ledger_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    difference: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    statement_rows: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ledger_rows: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    # False when the statement's rows don't add up to its own balance change (extraction is suspect).
+    trusted: Mapped[bool | None] = mapped_column(Boolean)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

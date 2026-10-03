@@ -127,7 +127,7 @@ async def test_spreadsheet_import_flow(client, setup, monkeypatch):
     pending = (await client.get("/api/duplicates")).json()
     assert not any({p["a"]["description"], p["b"]["description"]} == {"Ameren Electric", "AMEREN ILLINOIS"} for p in pending)
     kept = (await client.get("/api/duplicates", params={"status": "confirmed_separate"})).json()
-    assert len(kept) == 1
+    assert len([p for p in kept if p["b"]["description"] == "AMEREN ILLINOIS"]) == 1
 
     # Re-importing the same file: template applies, everything already exists
     r = await client.post("/api/imports", files={"file": ("chase_sep_again.csv", CSV.encode(), "text/csv")})

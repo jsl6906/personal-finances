@@ -159,6 +159,11 @@ async def _finish_batch(session: AsyncSession, bf: BackfillFile, batch: ImportBa
     ambiguous = await auto_resolve(session, batch)
     if ambiguous:
         gate = gate or f"{ambiguous} possible duplicate{'s' if ambiguous > 1 else ''} to decide"
+    if not gate and batch.source_type == "document":
+        from ledger.imports.coverage import gate_message, save_checks
+
+        labels = {a["ref"]: _account_label(a) for a in (batch.doc_meta or {}).get("accounts") or []}
+        gate = gate_message(await save_checks(session, batch), labels)
     if gate:
         bf.status, bf.message = "review", gate
         return []
