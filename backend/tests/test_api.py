@@ -135,6 +135,31 @@ async def test_bulk_update_and_tags(client, refs):
     assert page["total"] == 3
 
 
+async def test_transaction_sorting(client, refs):
+    acct = (await client.post("/api/accounts", json={"name": "Sort Check", "mask": "7101"})).json()["id"]
+    water = refs["cats"]["Water"]["id"]
+    rows = [
+        ("2026-07-03", "ZULU SORTER", "-5.00", None),
+        ("2026-07-01", "alpha sorter", "-50.00", water),
+        ("2026-07-02", "Mike Sorter", "20.00", None),
+    ]
+    for day, desc, amount, cat in rows:
+        body = {"txn_date": day, "description": desc, "amount": amount, "account_id": acct, "category_id": cat}
+        assert (await client.post("/api/transactions", json=body)).status_code == 201
+
+    async def order(sort: str) -> list[str]:
+        page = (await client.get("/api/transactions", params={"account_id": acct, "sort": sort})).json()
+        return [t["description"] for t in page["items"]]
+
+    assert await order("date_desc") == ["ZULU SORTER", "Mike Sorter", "alpha sorter"]
+    assert await order("description_asc") == ["alpha sorter", "Mike Sorter", "ZULU SORTER"]
+    assert await order("amount_asc") == ["alpha sorter", "ZULU SORTER", "Mike Sorter"]
+    # Uncategorized rows go last either way; ties fall back to newest first.
+    assert await order("category_desc") == ["alpha sorter", "ZULU SORTER", "Mike Sorter"]
+    assert await order("account_asc") == ["ZULU SORTER", "Mike Sorter", "alpha sorter"]
+    assert (await client.get("/api/transactions", params={"sort": "merchant_up"})).status_code == 422
+
+
 async def test_categorize_job_with_mocked_ai(client, refs, monkeypatch):
     from ledger.ai import categorize
     from ledger.jobs.worker import JobContext

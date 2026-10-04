@@ -76,6 +76,11 @@ a:hover { color: var(--color-accent-900); }
 .table tbody tr.row-missing { background: var(--color-over-bg); }
 .table tbody tr.row-pending { background: var(--color-pace-bg); }
 .table td.check, .table th.check { width: 28px; padding-right: 0; }
+.th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font: inherit;
+  letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.th-sort:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 2px; }
+.th-sort-arrow { font-size: 9px; opacity: 0.35; }
+.th-sort.active .th-sort-arrow { opacity: 1; }
 .table tbody tr.group-row td { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
   color: var(--color-neutral-700); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 .table .input { min-height: 30px; padding: 3px 8px; }

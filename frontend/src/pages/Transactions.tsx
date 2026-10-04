@@ -10,7 +10,26 @@ import { accountPath, categoryPath } from '../links'
 import { TransactionDetail, RulePrompt } from './TransactionDetail'
 
 type Status = 'all' | 'uncategorized' | 'suggested' | 'with_statement'
+type SortKey = 'date' | 'description' | 'category' | 'account' | 'amount'
+type Sort = `${SortKey}_${'asc' | 'desc'}`
 const PAGE = 100
+
+function SortTh({ k, sort, onSort, children, className, right }: {
+  k: SortKey; sort: Sort; onSort: (s: Sort) => void; children: string; className?: string; right?: boolean
+}) {
+  const [key, dir] = sort.split('_') as [SortKey, 'asc' | 'desc']
+  const active = key === k
+  const first = k === 'date' || k === 'amount' ? 'desc' : 'asc'
+  return (
+    <th className={className} style={right ? { textAlign: 'right' } : undefined}
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={`th-sort${active ? ' active' : ''}`}
+        onClick={() => onSort(`${k}_${active ? (dir === 'asc' ? 'desc' : 'asc') : first}`)}>
+        {children}<span className="th-sort-arrow">{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  )
+}
 
 export function Transactions() {
   const qc = useQueryClient()
@@ -37,6 +56,7 @@ export function Transactions() {
   const [categoryId, setCategoryId] = useState<number | null>(() =>
     searchParams.get('category') ? Number(searchParams.get('category')) : null)
   const [offset, setOffset] = useState(0)
+  const [sort, setSort] = useState<Sort>('date_desc')
   const [selected, setSelected] = useState<number | 'new' | null>(null)
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [bulkCategory, setBulkCategory] = useState<number | null>(null)
@@ -48,7 +68,7 @@ export function Transactions() {
     : periodRange(period)
   const params = {
     q, status, ...range, account_id: accountId ?? undefined,
-    category_id: categoryId ?? (urlCats.length ? urlCats : undefined), limit: PAGE, offset,
+    category_id: categoryId ?? (urlCats.length ? urlCats : undefined), limit: PAGE, offset, sort,
     import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
   }
   const resetPage = () => {
@@ -241,7 +261,12 @@ export function Transactions() {
                   <input type="checkbox" checked={allChecked}
                     onChange={() => setChecked(allChecked ? new Set() : new Set(items.map((t) => t.id)))} />
                 </th>
-                <th>Date</th><th>Description</th><th>Category</th><th className="hide-sm">Account</th><th className="hide-sm"></th><th style={{ textAlign: 'right' }}>Amount</th>
+                <SortTh k="date" sort={sort} onSort={onFilter(setSort)}>Date</SortTh>
+                <SortTh k="description" sort={sort} onSort={onFilter(setSort)}>Description</SortTh>
+                <SortTh k="category" sort={sort} onSort={onFilter(setSort)}>Category</SortTh>
+                <SortTh k="account" sort={sort} onSort={onFilter(setSort)} className="hide-sm">Account</SortTh>
+                <th className="hide-sm"></th>
+                <SortTh k="amount" sort={sort} onSort={onFilter(setSort)} right>Amount</SortTh>
               </tr>
             </thead>
             <tbody>

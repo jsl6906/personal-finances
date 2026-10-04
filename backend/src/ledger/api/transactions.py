@@ -44,13 +44,26 @@ from ledger.services.normalize import fingerprint
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
-SORTS = {
-    "date_desc": (Transaction.txn_date.desc(), Transaction.id.desc()),
-    "date_asc": (Transaction.txn_date.asc(), Transaction.id.asc()),
-    "amount_desc": (Transaction.amount.desc(), Transaction.id.desc()),
-    "amount_asc": (Transaction.amount.asc(), Transaction.id.asc()),
-    "added_desc": (Transaction.created_at.desc(), Transaction.id.desc()),
+SORT_KEYS = {
+    "date": Transaction.txn_date,
+    "amount": Transaction.amount,
+    "added": Transaction.created_at,
+    "description": func.lower(Transaction.description),
+    "category": func.lower(Category.name),
+    "account": func.lower(Account.name),
 }
+SORT_PATTERN = rf"^({'|'.join(SORT_KEYS)})_(asc|desc)$"
+
+
+def _sorted(stmt: Select, sort: str) -> Select:
+    key, direction = sort.rsplit("_", 1)
+    if key == "category":
+        stmt = stmt.outerjoin(Category, Category.id == Transaction.category_id)
+    elif key == "account":
+        stmt = stmt.outerjoin(Account, Account.id == Transaction.account_id)
+    col = SORT_KEYS[key]
+    first = col.asc().nulls_last() if direction == "asc" else col.desc().nulls_last()
+    return stmt.order_by(first, Transaction.txn_date.desc(), Transaction.id.desc())
 
 
 def to_out(t: Transaction) -> TransactionOut:
@@ -206,7 +219,7 @@ async def list_transactions(
     import_batch_id: int | None = None,
     merchant: str | None = None,
     rule_id: int | None = None,
-    sort: Literal["date_desc", "date_asc", "amount_desc", "amount_asc", "added_desc"] = "date_desc",
+    sort: str = Query("date_desc", pattern=SORT_PATTERN),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -224,7 +237,7 @@ async def list_transactions(
             ).where(*conds)
         )
     ).one()
-    stmt: Select = select(Transaction).where(*conds).order_by(*SORTS[sort]).limit(limit).offset(offset)
+    stmt: Select = _sorted(select(Transaction).where(*conds), sort).limit(limit).offset(offset)
     rows = (await session.scalars(stmt)).unique().all()
     return TransactionPage(items=[to_out(t) for t in rows], total=agg[0], total_in=agg[1], total_out=agg[2])
 
@@ -246,7 +259,8 @@ async def export_csv(
     conds = _filtered(
         q, start, end, account_id, category_id, group_id, None, tag_id, status, None, None, import_batch_id, merchant
     )
-    rows = (await session.scalars(select(Transaction).where(*conds).order_by(*SORTS["date_asc"]))).unique().all()
+    by_date = select(Transaction).where(*conds).order_by(Transaction.txn_date.asc(), Transaction.id.asc())
+    rows = (await session.scalars(by_date)).unique().all()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(
