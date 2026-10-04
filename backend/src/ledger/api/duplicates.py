@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,11 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.api.imports import _brief
 from ledger.db.engine import get_session
+from ledger.db.filters import id_in
 from ledger.jobs.worker import enqueue, notify_worker
 from ledger.models import DuplicatePair, Transaction, TransactionNote, TransactionSource
-from ledger.schemas import JobOut, PairDecisionIn, ScanIn, TxnPairOut
+from ledger.schemas import BulkPairDecisionIn, JobOut, PairDecisionIn, ScanIn, TxnPairOut
 from ledger.services.dedupe import other_description
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
 
 
@@ -69,6 +72,74 @@ async def pairs_for_transaction(txn_id: int, session: AsyncSession = Depends(get
     return [p for p in out if p]
 
 
+async def _merge(session: AsyncSession, p: DuplicatePair, keep_id: int, now: datetime) -> None:
+    drop_id = p.txn_b_id if keep_id == p.txn_a_id else p.txn_a_id
+    keep, drop = await session.get(Transaction, keep_id), await session.get(Transaction, drop_id)
+    # Carry over anything the removed copy knew that the survivor doesn't.
+    if keep.category_id is None and drop.category_id is not None:
+        keep.category_id, keep.category_source = drop.category_id, drop.category_source
+        keep.category_rule_id = drop.category_rule_id
+    if drop.notes and drop.notes not in (keep.notes or ""):
+        keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
+    other = other_description(drop.description, keep.description, keep.original_description)
+    if other and other not in (keep.notes or ""):
+        line = f"Also described as: {other}"
+        keep.notes = f"{keep.notes}\n{line}" if keep.notes else line
+    keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())
+    await session.execute(
+        update(TransactionSource)
+        .where(TransactionSource.transaction_id == drop_id)
+        .values(transaction_id=keep_id, role="matched", match_score=p.score)
+    )
+    await session.execute(
+        update(TransactionNote).where(TransactionNote.transaction_id == drop_id).values(transaction_id=keep_id)
+    )
+    drop.deleted_at = now
+    p.status = "confirmed_duplicate"
+
+
+@router.post("/decisions")
+async def decide_many(body: BulkPairDecisionIn, session: AsyncSession = Depends(get_session)):
+    """Decide many pending pairs at once; pairs whose transactions were already removed (e.g. by an earlier merge in
+    the same batch) are skipped."""
+    pairs = (
+        await session.scalars(
+            select(DuplicatePair)
+            .where(
+                id_in(DuplicatePair.id, body.pair_ids),
+                DuplicatePair.status == "pending",
+                DuplicatePair.txn_b_id.is_not(None),
+            )
+            .order_by(DuplicatePair.score.desc(), DuplicatePair.id)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    decided = skipped = 0
+    for p in pairs:
+        live = (
+            await session.scalars(
+                select(Transaction.id).where(Transaction.id.in_([p.txn_a_id, p.txn_b_id]), Transaction.deleted_at.is_(None))
+            )
+        ).all()
+        if len(live) != 2:
+            skipped += 1
+            continue
+        try:
+            async with session.begin_nested():
+                if body.decision == "separate":
+                    p.status = "confirmed_separate"
+                else:
+                    await _merge(session, p, p.txn_a_id if body.decision == "keep_a" else p.txn_b_id, now)
+                p.decided_at = now
+                await session.flush()
+            decided += 1
+        except Exception:
+            log.exception("Duplicate pair %s could not be decided", p.id)
+            skipped += 1
+    await session.commit()
+    return {"decided": decided, "skipped": skipped + len(body.pair_ids) - len(pairs)}
+
+
 @router.post("/{pair_id}/decide", response_model=TxnPairOut)
 async def decide(pair_id: int, body: PairDecisionIn, session: AsyncSession = Depends(get_session)):
     p = await session.get(DuplicatePair, pair_id)
@@ -81,29 +152,7 @@ async def decide(pair_id: int, body: PairDecisionIn, session: AsyncSession = Dep
         keep_id = body.keep_id or p.txn_a_id
         if keep_id not in (p.txn_a_id, p.txn_b_id):
             raise HTTPException(422, "keep_id must be one of the pair")
-        drop_id = p.txn_b_id if keep_id == p.txn_a_id else p.txn_a_id
-        keep, drop = await session.get(Transaction, keep_id), await session.get(Transaction, drop_id)
-        # Carry over anything the removed copy knew that the survivor doesn't.
-        if keep.category_id is None and drop.category_id is not None:
-            keep.category_id, keep.category_source = drop.category_id, drop.category_source
-            keep.category_rule_id = drop.category_rule_id
-        if drop.notes and drop.notes not in (keep.notes or ""):
-            keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
-        other = other_description(drop.description, keep.description, keep.original_description)
-        if other and other not in (keep.notes or ""):
-            line = f"Also described as: {other}"
-            keep.notes = f"{keep.notes}\n{line}" if keep.notes else line
-        keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())
-        await session.execute(
-            update(TransactionSource)
-            .where(TransactionSource.transaction_id == drop_id)
-            .values(transaction_id=keep_id, role="matched", match_score=p.score)
-        )
-        await session.execute(
-            update(TransactionNote).where(TransactionNote.transaction_id == drop_id).values(transaction_id=keep_id)
-        )
-        drop.deleted_at = now
-        p.status = "confirmed_duplicate"
+        await _merge(session, p, keep_id, now)
     p.decided_at = now
     await session.commit()
     out = await _pair_out(session, p)

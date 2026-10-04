@@ -418,6 +418,12 @@ class PairDecisionIn(BaseModel):
     keep_id: int | None = None
 
 
+class BulkPairDecisionIn(BaseModel):
+    pair_ids: list[int] = Field(min_length=1, max_length=2000)
+    # keep_a / keep_b: same transaction, keep that side and remove the other.
+    decision: Literal["keep_a", "keep_b", "separate"]
+
+
 class ScanIn(BaseModel):
     since: date | None = None
 

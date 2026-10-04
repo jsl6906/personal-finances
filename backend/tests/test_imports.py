@@ -325,6 +325,56 @@ async def test_scan_and_decide_duplicate(client, setup, monkeypatch):
     assert "Trader Joe's" in kept["notes"]
 
 
+async def test_bulk_decide_duplicate_pairs(client, setup, monkeypatch):
+    import ledger.jobs.worker as worker
+    from ledger.ai import imports as ai_imports
+
+    async def no_progress(self, fraction, message=None):
+        return None
+
+    async def no_verdicts(pairs):
+        return {}
+
+    monkeypatch.setattr(worker.JobContext, "progress", no_progress)
+    monkeypatch.setattr(ai_imports, "adjudicate_pairs", no_verdicts)
+    acct = setup["other"]["id"]
+
+    async def txn(day, desc, amount):
+        body = {"txn_date": f"2026-05-{day}", "description": desc, "amount": amount, "account_id": acct}
+        return (await client.post("/api/transactions", json=body)).json()["id"]
+
+    cafe = [await txn("10", "BULK DUP CAFE", "-23.47"), await txn("10", "Bulk Dup Cafe #2", "-23.47")]
+    gym = [await txn("12", "GYM MEMBERSHIP", "-31.13"), await txn("13", "GYM MEMBERSHIP DUES", "-31.13")]
+    park = [await txn(day, "CITY PARKING", "-6.67") for day in ("14", "14", "15")]
+    await _run("dup_scan", {"since": "2026-05-01"})
+    pairs = (await client.get("/api/duplicates", params={"limit": 1000})).json()
+
+    def among(ids):
+        return [p for p in pairs if {p["a"]["id"], p["b"]["id"]} <= set(ids)]
+
+    [cafe_pair], [gym_pair] = among(cafe), among(gym)
+    r = await client.post("/api/duplicates/decisions", json={"pair_ids": [cafe_pair["id"]], "decision": "separate"})
+    assert r.json() == {"decided": 1, "skipped": 0}
+    r = await client.post("/api/duplicates/decisions", json={"pair_ids": [gym_pair["id"], 999999], "decision": "keep_a"})
+    assert r.json() == {"decided": 1, "skipped": 1}
+    assert (await client.get(f"/api/transactions/{gym_pair['b']['id']}")).status_code == 404
+    survivor = (await client.get(f"/api/transactions/{gym_pair['a']['id']}")).json()
+    assert "Also described as" in (survivor["notes"] or "")
+
+    # Overlapping pairs: once a merge removes a transaction, later pairs that involve it are skipped.
+    park_pairs = among(park)
+    assert len(park_pairs) >= 2
+    r = (
+        await client.post(
+            "/api/duplicates/decisions", json={"pair_ids": [p["id"] for p in park_pairs], "decision": "keep_b"}
+        )
+    ).json()
+    assert r["decided"] + r["skipped"] == len(park_pairs) and r["skipped"] >= 1
+    live = [i for i in park if (await client.get(f"/api/transactions/{i}")).status_code == 200]
+    assert len(live) == len(park) - r["decided"]
+    assert (await client.post("/api/duplicates/decisions", json={"pair_ids": [], "decision": "keep_a"})).status_code == 422
+
+
 async def test_duplicate_rows_link_document_and_notes(client, setup, monkeypatch):
     import ledger.jobs.worker as worker
     from ledger.ai import imports as ai_imports
