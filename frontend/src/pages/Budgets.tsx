@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { del, get, post, put, type Budget, type BudgetRow, type BudgetStatus, type BudgetSuggestion, type PeriodType, type SpreadRule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { TableCard } from '../components/Detail'
@@ -31,8 +31,15 @@ const STATUS_RANK: Record<BudgetRow['status'], number> = { over: 0, pace: 1, ok:
 
 export function Budgets() {
   const qc = useQueryClient()
-  const [period, setPeriod] = useState<PeriodType>('month')
-  const [on, setOn] = useState(() => iso(new Date()))
+  const [searchParams, setSearchParams] = useSearchParams()
+  const p = searchParams.get('period')
+  const period: PeriodType = p === 'quarter' || p === 'year' ? p : 'month'
+  const [today] = useState(() => iso(new Date()))
+  const on = searchParams.get('on') ?? today
+  // replace: stepping through periods shouldn't pile up history entries
+  const setView = (per: PeriodType, date: string) => setSearchParams({ period: per, on: date }, { replace: true })
+  const setPeriod = (per: PeriodType) => setView(per, on)
+  const setOn = (date: string) => setView(period, date)
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const status = useQuery({
     queryKey: ['budgets', 'status', period, on],
