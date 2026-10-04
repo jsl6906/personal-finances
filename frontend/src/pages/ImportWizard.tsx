@@ -537,6 +537,12 @@ function DocMetaCard({ b }: { b: BatchDetail }) {
           <span>{r.reconciles ? 'Rows match the balance change' : `Rows sum ${money(r.sum_of_rows)} vs balance change ${money(r.balance_change)}`}</span></>)}
       </div>
       {m.low_confidence_rows > 0 && <div className="small">{m.low_confidence_rows} rows need a look (highlighted).</div>}
+      {(m.balance_fixed?.length ?? 0) > 0 && (
+        <div className="small">
+          Corrected from the statement's running balance:{' '}
+          {m.balance_fixed!.map(f => `row ${f.row + 1} read as ${money(f.read)}, now ${money(f.amount)}`).join('; ')}.
+        </div>
+      )}
       <div className="card-meta">{m.summary} The document stays attached to the batch.</div>
     </Card>
   )

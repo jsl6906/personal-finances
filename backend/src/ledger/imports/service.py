@@ -602,6 +602,57 @@ def _reconcile(total: Decimal, opening: float | None, closing: float | None) -> 
     }
 
 
+def _dec(v) -> Decimal | None:
+    if v is None or v == "":
+        return None
+    return Decimal(str(v)).quantize(Decimal("0.01"))
+
+
+def balance_fixes(
+    amounts: list[Decimal], balances: list[Decimal | None], opening: Decimal | None, closing: Decimal | None
+) -> dict[int, Decimal]:
+    """One statement account's rows (document order) whose amount disagrees with the change in the printed running
+    balance: {position: amount implied by the balances}. Only returned when the corrected rows add up to the
+    statement's own balance change, so a misread balance is never mistaken for a misread amount."""
+    if opening is None or closing is None or not amounts:
+        return {}
+    change = closing - opening
+
+    def reconciles(total: Decimal) -> bool:
+        return abs(abs(change) - abs(total)) < Decimal("0.02")
+
+    total = sum(amounts, Decimal(0))
+    if reconciles(total):
+        return {}
+    n = len(amounts)
+    # Statements list rows oldest-first or newest-first; balances may be printed as owed (credit cards).
+    for chrono in (list(range(n)), list(range(n - 1, -1, -1))):
+        deltas: dict[int, Decimal] = {}
+        prev = opening
+        for i in chrono:
+            if balances[i] is None:
+                prev = None
+                continue
+            if prev is not None:
+                deltas[i] = balances[i] - prev
+            prev = balances[i]
+        for sign in (1, -1):
+            ok = {i for i, d in deltas.items() if amounts[i] == sign * d}
+            if len(ok) < max(1, len(deltas) - len(ok)):
+                continue
+            fixes = {}
+            for pos, i in enumerate(chrono):
+                if i not in deltas or i in ok:
+                    continue
+                # The row's own balance must be confirmed by the next row (or the closing balance).
+                nxt = chrono[pos + 1] if pos + 1 < n else None
+                if (nxt is None and balances[i] == closing) or nxt in ok:
+                    fixes[i] = sign * deltas[i]
+            if fixes and reconciles(total + sum(fixes[i] - amounts[i] for i in fixes)):
+                return fixes
+    return {}
+
+
 def _row_account(value: str | None, accounts: list[dict]) -> str:
     """Resolve a transaction's account reference to one of the statement accounts' refs."""
     if len(accounts) == 1:
@@ -636,22 +687,33 @@ async def extract_into_batch(session: AsyncSession, batch: ImportBatch) -> dict:
         ]
     accounts = [{**a.model_dump(), "ref": (a.last4 or a.name).strip()} for a in found]
     refs = [_row_account(t.account, accounts) if accounts else "" for t in result.transactions]
+    amounts = [_dec(t.amount) for t in result.transactions]
+    balances = [_dec(t.balance) for t in result.transactions]
+    fixed: dict[int, Decimal] = {}
+    for ref, opening, closing in [(a["ref"], a["opening_balance"], a["closing_balance"]) for a in accounts] or [
+        ("", result.opening_balance, result.closing_balance)
+    ]:
+        mine = [i for i, r in enumerate(refs) if r == ref]
+        found_fixes = balance_fixes([amounts[i] for i in mine], [balances[i] for i in mine], _dec(opening), _dec(closing))
+        fixed.update({mine[p]: amt for p, amt in found_fixes.items()})
+    balance_fixed = [{"row": i, "read": f"{amounts[i]:.2f}", "amount": f"{amt:.2f}"} for i, amt in sorted(fixed.items())]
+    for i, amt in fixed.items():
+        amounts[i] = amt
     rows = [
         {
             "Date": t.date,
             "Posted": t.posted_date or "",
             "Description": t.description,
             "Details": t.details or "",
-            "Amount": f"{t.amount:.2f}",
+            "Amount": f"{amt:.2f}",
             "Account": ref,
-            "Balance": "" if t.balance is None else f"{t.balance:.2f}",
+            "Balance": "" if bal is None else f"{bal:.2f}",
             "Confidence": f"{t.confidence:.2f}",
         }
-        for t, ref in zip(result.transactions, refs, strict=True)
+        for t, ref, amt, bal in zip(result.transactions, refs, amounts, balances, strict=True)
     ]
     await _insert_rows(session, batch, rows)
 
-    amounts = [Decimal(str(t.amount)).quantize(Decimal("0.01")) for t in result.transactions]
     for a in accounts:
         mine = [amt for amt, ref in zip(amounts, refs, strict=True) if ref == a["ref"]]
         a["rows"] = len(mine)
@@ -673,6 +735,8 @@ async def extract_into_batch(session: AsyncSession, batch: ImportBatch) -> dict:
             "unassigned_rows": sum(1 for ref in refs if ref not in known),
             "low_confidence_rows": sum(1 for t in result.transactions if t.confidence < 0.8),
             "reconciliation": recon,
+            # Amounts misread from the document, corrected from its running balance column.
+            "balance_fixed": balance_fixed,
         }
     )
     batch.doc_meta = meta

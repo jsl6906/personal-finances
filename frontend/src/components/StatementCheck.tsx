@@ -19,7 +19,7 @@ const STATUS_CLASS: Record<CheckStatus, string> = {
 }
 const KIND_LABEL: Record<CheckIssue['kind'], string> = {
   missing: 'Missing from ledger', extra: 'Not on statement', amount: 'Amount differs', link: 'Already in ledger',
-  edge: 'Near period edge', elsewhere: 'In another account',
+  edge: 'Near period edge', listed: 'On another statement', elsewhere: 'In another account',
 }
 const FIX_LABEL: Record<string, string> = {
   add: 'Add to ledger', remove: 'Remove from ledger', amount: 'Use statement amount', link: 'Link, don’t add',
@@ -125,7 +125,12 @@ function AccountCheck({ b, c, multi, onApplied }: {
           + ' suggested fixes are pre-selected; review them and apply.'}
         {shifted > 0 && ` ${shifted} matched transaction${shifted === 1 ? ' is' : 's are'} dated just outside the period.`}
       </div>
-      {c.detail.message && <div className="callout">{c.detail.message}</div>}
+      {c.detail.message && (
+        <div className="callout">
+          {c.detail.message}
+          {c.detail.same_file?.map((id) => <span key={id}> · <Link to={`/import/${id}`}>Open import #{id}</Link></span>)}
+        </div>
+      )}
       {c.trusted === false && (
         <div className="callout">The statement’s rows don’t add up to its own balance change, so its rows may be
           misread; nothing is pre-selected.</div>

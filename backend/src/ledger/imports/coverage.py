@@ -33,6 +33,7 @@ from ledger.models import (
     TransactionNote,
     TransactionSource,
 )
+from ledger.services.dedupe import more_descriptive
 from ledger.services.normalize import fingerprint
 
 log = logging.getLogger(__name__)
@@ -182,15 +183,35 @@ async def check_batch(session: AsyncSession, batch: ImportBatch) -> list[dict]:
         groups[(r.raw.get("Account") or "") if accounts else ""].append(r)
     period = (parse_date(meta.get("period_start")), parse_date(meta.get("period_end")))
     account_map = batch.defaults.get("account_map") or {}
+    twins = await same_file_imports(session, batch)
     out = []
     for a in accounts or [None]:
         ref = a["ref"] if a else ""
         recon = a.get("reconciliation") if a else meta.get("reconciliation")
         mapped = (account_map.get(ref) if a else None) or (batch.defaults.get("account_id") if len(accounts) <= 1 else None)
         out.append(
-            await _check_account(session, batch, ref, groups.get(ref, []), links, period, recon, mapped, not accounts)
+            await _check_account(session, batch, ref, groups.get(ref, []), links, period, recon, mapped, not accounts, twins)
         )
     return out
+
+
+async def same_file_imports(session: AsyncSession, batch: ImportBatch) -> list[int]:
+    """Other committed imports of the very same file."""
+    if not batch.attachment_id:
+        return []
+    return list(
+        (
+            await session.scalars(
+                select(ImportBatch.id)
+                .where(
+                    ImportBatch.attachment_id == batch.attachment_id,
+                    ImportBatch.id != batch.id,
+                    ImportBatch.status == "committed",
+                )
+                .order_by(ImportBatch.id)
+            )
+        ).all()
+    )
 
 
 async def _check_account(
@@ -203,9 +224,11 @@ async def _check_account(
     recon: dict | None,
     mapped: int | None,
     legacy: bool,
+    twins: list[int],
 ) -> dict:
     """`mapped`: the ledger account chosen for this statement account at import; `legacy`: the document was read
-    before statements were split by account, so its rows may span several accounts."""
+    before statements were split by account, so its rows may span several accounts; `twins`: other committed imports
+    of the same file."""
     review = batch.status == "review"
     valid = [r for r in rows if r.txn_date and r.amount is not None and r.decision != "invalid"]
     trusted = None if not recon else bool(recon.get("reconciles"))
@@ -323,7 +346,7 @@ async def _check_account(
             f"{len(away)} rows match transactions in other accounts; this document probably covers several accounts"
         )
     # Ledger rows backed by another statement are that statement's to explain; don't pair them up here.
-    others = await _on_other_statements(session, batch.id, list(L))
+    others = await _on_other_statements(session, batch, list(L))
 
     # Same amount, nearby date: rows whose link went missing pair up silently; rows about to be inserted would
     # duplicate a ledger transaction no other statement row accounts for.
@@ -388,19 +411,20 @@ async def _check_account(
 
     def redate(row: _Row, name: str, t: _Txn, hint: str, conf: int) -> dict:
         effect = Decimal(0) if ps <= row.date <= pe else -t.amount
-        issue = _issue("edge", "date", row, t, effect, hint, suggested=True, confidence=conf)
+        issue = _issue("listed", "date", row, t, effect, hint, suggested=True, confidence=conf)
         issue["row"]["statement"] = name
         return issue
 
     elsewhere = await _rows_elsewhere(
         session,
-        batch.id,
+        batch,
         account_id,
         {t.amount for t in free if t.id not in others and near(t)},
         ps - timedelta(days=WINDOW_DAYS),
         pe + timedelta(days=WINDOW_DAYS),
     )
     used: set[int] = set()
+    kept: set[int] = set()
     for t in sorted(free, key=lambda t: (t.date, t.id)):
         twin = next(
             (
@@ -426,7 +450,7 @@ async def _check_account(
             if row and row.date != t.date:
                 issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}", 95))
             else:
-                issues.append(_issue("edge", None, None, t, Decimal(0), f"Listed on {name}"))
+                issues.append(_issue("listed", None, None, t, Decimal(0), f"Listed on {name}"))
         elif nearby and not nearby[0][0]:
             *_, row, name = nearby[0]
             used.add(row.id)
@@ -452,7 +476,21 @@ async def _check_account(
                 conf = 95 if twin_similar else 88
             else:
                 conf = 85 if twin and twin_similar else 75
-            issues.append(_issue("extra", "remove", None, t, -t.amount, hint, confidence=conf))
+            issue = _issue("extra", "remove", None, t, -t.amount, hint, confidence=conf)
+            # The copy the statement lists survives; on removal it can take this one's name.
+            keep = min(
+                (
+                    c
+                    for c in L.values()
+                    if c.id in claimed and c.id not in kept and c.amount == t.amount and abs((c.date - t.date).days) <= 1
+                ),
+                key=lambda c: (abs((c.date - t.date).days), not more_descriptive(t.description, c.description), c.id),
+                default=None,
+            )
+            if keep:
+                kept.add(keep.id)
+                issue["keep_id"] = keep.id
+            issues.append(issue)
 
     # Loan and some savings statements print amounts with the opposite sign to the ledger.
     missing = [i for i in issues if i["kind"] == "missing"]
@@ -478,12 +516,20 @@ async def _check_account(
         for s in S
         if s.id in matched and not ps <= matched[s.id].date <= pe
     ]
+    if twins:
+        result["detail"]["same_file"] = twins
+        result["detail"]["message"] = (
+            f"This file was also imported as {', '.join(f'import #{i}' for i in twins)}; roll one of the imports "
+            "back rather than fixing transactions"
+        )
     for i in issues:
-        if i["suggested"] is None:
+        if twins:
+            i["suggested"] = False
+        elif i["suggested"] is None:
             i["suggested"] = i["kind"] in ACTIONABLE and trusted is not False and not reversed_signs
     # Without the statement's own balances to vouch for its rows, a person should look first.
     cap = 99 if trusted else 85 if trusted is None else 0
-    if reversed_signs:
+    if reversed_signs or twins:
         cap = 0
     elif result["detail"].get("message"):
         cap = min(cap, 50)
@@ -526,10 +572,10 @@ def _other_row(r) -> _Row:
 
 
 async def _on_other_statements(
-    session: AsyncSession, batch_id: int, txn_ids: list[int]
+    session: AsyncSession, batch: ImportBatch, txn_ids: list[int]
 ) -> dict[int, tuple[str, _Row | None]]:
     """Ledger transactions created by or matched to rows of other statement documents -> (that document's name, its
-    row when those statements agree on one date)."""
+    row when those statements agree on one date). Another import of the same file isn't another statement."""
     if not txn_ids:
         return {}
     q = (
@@ -539,7 +585,8 @@ async def _on_other_statements(
         .outerjoin(ImportRow, ImportRow.id == TransactionSource.import_row_id)
         .where(
             id_in(TransactionSource.transaction_id, txn_ids),
-            TransactionSource.import_batch_id != batch_id,
+            TransactionSource.import_batch_id != batch.id,
+            ImportBatch.attachment_id.is_distinct_from(batch.attachment_id),
             ImportBatch.source_type == "document",
             ImportBatch.status == "committed",
         )
@@ -557,7 +604,7 @@ async def _on_other_statements(
 
 
 async def _rows_elsewhere(
-    session: AsyncSession, batch_id: int, account_id: int, amounts: set[Decimal], lo: date, hi: date
+    session: AsyncSession, batch: ImportBatch, account_id: int, amounts: set[Decimal], lo: date, hi: date
 ) -> list[tuple[_Row, str, int | None]]:
     """Rows of other statements for this account with one of these amounts -> (row, document name, the live ledger
     transaction that accounts for it or None)."""
@@ -569,7 +616,8 @@ async def _rows_elsewhere(
             .join(ImportBatch, ImportBatch.id == ImportRow.batch_id)
             .join(Attachment, Attachment.id == ImportBatch.attachment_id)
             .where(
-                ImportRow.batch_id != batch_id,
+                ImportRow.batch_id != batch.id,
+                ImportBatch.attachment_id.is_distinct_from(batch.attachment_id),
                 ImportBatch.source_type == "document",
                 ImportBatch.status == "committed",
                 ImportRow.decision != "invalid",
@@ -644,6 +692,8 @@ async def auto_fix(session: AsyncSession, batch: ImportBatch) -> dict:
 def gate_message(checks: list[dict], labels: dict[str, str] | None = None) -> str | None:
     """Why a statement shouldn't be committed without a person looking at it (None when it checks out)."""
     for c in checks:
+        if c["detail"].get("same_file"):
+            return c["detail"]["message"]
         if c["status"] != "mismatch" or c["trusted"] is False:
             continue
         n = sum(1 for i in c["detail"]["issues"] if i["kind"] in ACTIONABLE)
@@ -697,6 +747,8 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
                 row.transaction_id, row.decision = t.id, "keep"
                 new_ids.append(t.id)
         elif issue["fix"] == "remove":
+            if issue.get("keep_id"):
+                await carry_over(session, batch, issue["keep_id"], txn)
             txn.deleted_at = now
             await session.execute(
                 update(Transaction).where(Transaction.transfer_match_id == txn.id).values(transfer_match_id=None)
@@ -728,6 +780,56 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
         await save_checks(session, await session.get(ImportBatch, other_id))
     checks = await save_checks(session, batch)
     return {"applied": applied, "skipped": skipped, "new_ids": new_ids, "checks": checks}
+
+
+async def carry_over(session: AsyncSession, batch: ImportBatch, keep_id: int, drop: Transaction) -> bool:
+    """Removing a feed's copy of a transaction the statement lists: the statement's copy survives but takes the feed's
+    more descriptive name, merchant and category (bank statements print generic labels like "ACH Withdrawal")."""
+    keep = await session.get(Transaction, keep_id)
+    if keep is None or keep.deleted_at is not None or keep.id == drop.id:
+        return False
+    batch_ids = [i for i in (keep.import_batch_id, drop.import_batch_id) if i]
+    kinds = dict(
+        (
+            await session.execute(select(ImportBatch.id, ImportBatch.source_type).where(id_in(ImportBatch.id, batch_ids)))
+        ).all()
+    )
+    if kinds.get(keep.import_batch_id) != "document" or kinds.get(drop.import_batch_id) == "document":
+        return False
+    if not more_descriptive(drop.description, keep.description):
+        return False
+    old = keep.description
+    keep.description = drop.description
+    if keep.merchant_source != "user":
+        keep.merchant, keep.merchant_source = drop.merchant, drop.merchant_source
+    if drop.category_id is not None and keep.category_source != "user":
+        keep.category_id, keep.category_source = drop.category_id, drop.category_source
+        keep.category_rule_id = drop.category_rule_id
+    if drop.notes and drop.notes not in (keep.notes or ""):
+        keep.notes = f"{keep.notes}\n{drop.notes}" if keep.notes else drop.notes
+    keep.tags = list({t.id: t for t in [*keep.tags, *drop.tags]}.values())
+    keep.fingerprint = fingerprint(keep.account_id, keep.txn_date, keep.amount, keep.description)
+    on_keep = select(TransactionSource.import_row_id).where(
+        TransactionSource.transaction_id == keep.id, TransactionSource.import_row_id.is_not(None)
+    )
+    await session.execute(
+        update(TransactionSource)
+        .where(
+            TransactionSource.transaction_id == drop.id,
+            or_(TransactionSource.import_row_id.is_(None), TransactionSource.import_row_id.not_in(on_keep)),
+        )
+        .values(transaction_id=keep.id, role="matched")
+    )
+    await session.execute(
+        update(TransactionNote)
+        .where(
+            TransactionNote.transaction_id == drop.id,
+            TransactionNote.import_batch_id.is_distinct_from(batch.id),
+        )
+        .values(transaction_id=keep.id)
+    )
+    _note(session, batch, keep.id, f"Also described as: {old}")
+    return True
 
 
 def _note(session: AsyncSession, batch: ImportBatch, txn_id: int, body: str) -> None:

@@ -6,6 +6,7 @@ Pairs confirmed as separate are kept so they are never flagged again.
 """
 
 import logging
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -33,6 +34,23 @@ def other_description(incoming: str | None, *known: str | None) -> str | None:
     if not d or _norm_desc(d) in {_norm_desc(k) for k in known if k}:
         return None
     return d
+
+
+# Words banks print on every row of a kind; they say nothing about who the money went to.
+_GENERIC = frozenset(
+    "ach withdrawal withdrawl deposit debit credit card purchase pos payment pmt now online transfer xfer check paid "
+    "electronic web ppd ccd tel id the to from of".split()
+)
+
+
+def _informative(s: str | None) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", (s or "").casefold())
+    return {w for w in words if w not in _GENERIC and not w.isdigit()}
+
+
+def more_descriptive(candidate: str | None, current: str | None) -> bool:
+    """`candidate` names everything `current` does and more, e.g. 'Invest529 Payment' vs. 'ACH Withdrawal'."""
+    return _informative(current) < _informative(candidate)
 
 
 def score_pair(dd: int, same_acct: bool | None, sim: float, exact: bool) -> tuple[float, list[str]]:

@@ -75,6 +75,25 @@ def _by_kind(check: dict) -> dict[str, list[dict]]:
     return out
 
 
+def test_balance_fixes_correct_a_misread_amount():
+    from decimal import Decimal as D
+
+    from ledger.imports.service import balance_fixes
+
+    amounts = [D("1000"), D("1000"), D("1000"), D("800"), D("-2000"), D("172"), D("6.96")]
+    balances = [D(b) for b in ("8400.34", "8500.34", "9500.34", "10300.34", "8300.34", "8472.34", "8479.30")]
+    assert balance_fixes(amounts, balances, D("7400.34"), D("8479.30")) == {1: D("100.00")}
+    # Newest-first listing.
+    assert balance_fixes(amounts[::-1], balances[::-1], D("7400.34"), D("8479.30")) == {5: D("100.00")}
+    # Credit card: balance owed rises with purchases (negative amounts).
+    assert balance_fixes([D("-50"), D("-200"), D("-30")], [D("150"), D("170"), D("200")], D("100"), D("200")) == {
+        1: D("-20")
+    }
+    # Already reconciles, or the row's own balance isn't confirmed by the next row: nothing to fix.
+    assert balance_fixes([D("50"), D("20")], [D("150"), D("170")], D("100"), D("170")) == {}
+    assert balance_fixes([D("50"), D("200"), D("30")], [D("150"), D("999"), D("200")], D("100"), D("200")) == {}
+
+
 async def test_review_proposes_fixes_that_trust_the_statement(client, monkeypatch):
     acct = (await client.post("/api/accounts", json={"name": "Coverage Card", "mask": "6602"})).json()["id"]
     coffee = await _txn(client, acct, "2021-04-05", "BLUE BOTTLE COFFEE", "-4.75")
@@ -210,7 +229,7 @@ async def test_edge_transaction_on_another_statement_takes_its_date(client, monk
     assert c["status"] == "explained" and c["difference"] == "16.65"
     fixes = {i["transaction_id"]: i for i in c["detail"]["issues"]}
     assert set(fixes) == {late, diner}
-    assert all(i["kind"] == "edge" and i["fix"] == "date" and i["suggested"] for i in fixes.values())
+    assert all(i["kind"] == "listed" and i["fix"] == "date" and i["suggested"] for i in fixes.values())
     assert fixes[late]["row"]["date"] == "2021-09-29" and fixes[late]["row"]["statement"] == "cov_sep.pdf"
     assert fixes[diner]["row"]["date"] == "2021-09-30" and fixes[diner]["effect"] == "8.88"
 
@@ -249,3 +268,44 @@ async def test_account_timeline_shows_gaps_and_imports_in_progress(client, monke
     gap = items[2]
     assert gap["period_start"] == "2022-04-01" and gap["estimated"] == 2
     assert float(items[1]["statement_total"]) == float(items[1]["ledger_total"]) == -16.06
+
+
+async def test_removed_feed_copy_lends_its_name_to_the_statement_copy(client, monkeypatch):
+    from ledger.services.dedupe import more_descriptive
+
+    assert more_descriptive("Invest529 Payment", "ACH Withdrawal")
+    assert not more_descriptive("Home Depot", "THE HOME DEPOT SPRINGFIELD VA")
+    assert not more_descriptive("True United", "EXXONMOBIL 47833538 SUITLAND MD")
+
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Names", "mask": "6607"})).json()["id"]
+    feed = await _txn(client, acct, "2021-11-17", "INVEST529 PAYMENT", "-75.00")
+    rows = [("2021-11-17", "ACH WITHDRAWAL", -75.00), ("2021-11-20", "NAMES GROCER", -10.00)]
+    bid = await _statement(client, monkeypatch, "cov_nov.pdf", "6607", ("2021-11-01", "2021-11-30"), -85.00, rows)
+    # The statement row is kept as its own transaction, leaving the feed's copy as a duplicate.
+    await client.post(f"/api/imports/{bid}/commit", json={"pending_as": "keep"})
+    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
+    [extra] = [i for i in c["detail"]["issues"] if i["kind"] == "extra"]
+    assert extra["transaction_id"] == feed and extra["keep_id"]
+
+    r = await client.post(f"/api/imports/{bid}/checks/fix", json={"fixes": [{"fix": "remove", "transaction_id": feed}]})
+    assert r.json()["checks"][0]["status"] == "ok"
+    kept = (await client.get(f"/api/transactions/{extra['keep_id']}")).json()
+    assert kept["description"] == "INVEST529 PAYMENT"
+    notes = [n["body"] for n in (await client.get(f"/api/transactions/{extra['keep_id']}/notes")).json()]
+    assert "Also described as: ACH WITHDRAWAL" in notes
+
+
+async def test_same_file_imported_twice_is_flagged_not_explained(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Twice", "mask": "6608"})).json()["id"]
+    rows = [("2021-12-10", "TWICE SHOP", -30.00), ("2021-12-11", "TWICE CAFE", -5.00)]
+    period = ("2021-12-01", "2021-12-31")
+    first = await _statement(client, monkeypatch, "cov_dec.pdf", "6608", period, -35.00, rows)
+    await client.post(f"/api/imports/{first}/commit", json={})
+    second = await _statement(client, monkeypatch, "cov_dec.pdf", "6608", period, -35.00, rows)
+    assert second != first
+
+    [c] = (await client.get(f"/api/imports/{second}/checks")).json()
+    assert c["account_id"] == acct and c["detail"]["same_file"] == [first]
+    assert not any(i["suggested"] for i in c["detail"]["issues"])
+    r = await client.post(f"/api/imports/{second}/commit", json={"pending_as": "keep"})
+    assert r.status_code == 409 and f"#{first}" in r.json()["detail"]

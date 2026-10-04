@@ -175,6 +175,7 @@ export interface DocMeta {
   low_confidence_rows: number
   reconciliation: Reconciliation | null
   accounts?: StatementAccount[]; unassigned_rows?: number
+  balance_fixed?: { row: number; read: string; amount: string }[]
 }
 
 export interface BatchSource {
@@ -211,7 +212,7 @@ export interface ImportPair {
 export type CheckStatus = 'ok' | 'explained' | 'mismatch' | 'unverified'
 export type CheckFixKind = 'add' | 'remove' | 'amount' | 'link' | 'date'
 export interface CheckIssue {
-  kind: 'missing' | 'extra' | 'amount' | 'link' | 'edge' | 'elsewhere'; fix: CheckFixKind | null
+  kind: 'missing' | 'extra' | 'amount' | 'link' | 'edge' | 'listed' | 'elsewhere'; fix: CheckFixKind | null
   row_id: number | null; transaction_id: number | null
   row: { row_id: number; row_index: number; date: string; description: string; amount: string; statement?: string } | null
   txn: { id: number; date: string; description: string; amount: string; source_type: string } | null
@@ -224,7 +225,7 @@ export interface StatementCheck {
   statement_rows: number; ledger_rows: number; status: CheckStatus; trusted: boolean | null
   detail: {
     issues: CheckIssue[]; shifted: { row: CheckIssue['row']; txn: CheckIssue['txn'] }[]; message?: string
-    totals_match?: boolean; unreadable_rows?: number; period_source?: 'statement' | 'rows'
+    totals_match?: boolean; unreadable_rows?: number; period_source?: 'statement' | 'rows'; same_file?: number[]
   }
 }
 export interface StatementCheckItem extends Omit<StatementCheck, 'detail'> {
