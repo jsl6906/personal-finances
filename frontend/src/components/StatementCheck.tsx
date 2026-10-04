@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   get, post, type BatchDetail, type CheckIssue, type CheckStatus, type Job, type StatementCheck, type StatementCheckList,
+  type StatementTimelineItem,
 } from '../api'
 import { fullDate, money, shortDate } from '../format'
 import { useJob } from '../hooks'
@@ -223,23 +224,40 @@ function AccountCheck({ b, c, multi, onApplied }: {
 
 type Filter = CheckStatus | 'all'
 
-/** Every committed statement for one account: its period, its rows' total and the ledger's total for that period. */
+const TIMELINE_LABEL: Record<Exclude<StatementTimelineItem['kind'], 'statement'>, string> = {
+  review: 'Being imported', queued: 'In the backfill', missing: 'Missing',
+}
+
+const periodText = (s: string | null, e: string | null) =>
+  s && e ? `${shortDate(s)} – ${fullDate(e)}` : s ? `From ${fullDate(s)}` : e ? `To ${fullDate(e)}` : 'Period unknown'
+
+/** One account's statements: period, the rows' total and the ledger's total for that period, plus highlighted
+ * placeholders for statements still being imported or apparently missing. */
 export function AccountStatements({ accountId }: { accountId: number }) {
   const navigate = useNavigate()
   const list = useQuery({
-    queryKey: ['statement-checks', 'account', accountId],
-    queryFn: () => get<StatementCheckList>('/statement-checks', { account_id: accountId }),
+    queryKey: ['statement-checks', 'timeline', accountId],
+    queryFn: () => get<StatementTimelineItem[]>('/statement-checks/timeline', { account_id: accountId }),
   })
-  const items = list.data?.items ?? []
+  const items = list.data ?? []
   if (list.error) return <ErrorNote error={list.error} />
   if (!items.length) return null
+  const count = (k: StatementTimelineItem['kind']) => items.filter((i) => i.kind === k).length
+  const missing = items.filter((i) => i.kind === 'missing').reduce((n, i) => n + (i.estimated ?? 1), 0)
+  const inProgress = count('review') + count('queued')
+  const open = (i: StatementTimelineItem) => {
+    if (i.import_batch_id) navigate(`/import/${i.import_batch_id}`)
+    else if (i.backfill_file_id) navigate('/sources')
+  }
   return (
     <TableCard head={
       <div style={{ padding: 'var(--space-3) var(--space-3) 0' }}>
         <div className="card-kicker">Statements</div>
         <div className="card-meta">
-          {items.length} uploaded statement{items.length === 1 ? '' : 's'}. Totals are the net of the statement’s rows
-          and of the ledger’s transactions for this account over the same period. Click one to review it.
+          {count('statement')} imported
+          {inProgress ? ` · ${inProgress} in progress` : ''}
+          {missing ? ` · about ${missing} missing` : ''}. Totals are the net of the statement’s rows and of the
+          ledger’s transactions for this account over the same period. Gaps are judged from how often statements close.
         </div>
       </div>
     }>
@@ -253,19 +271,32 @@ export function AccountStatements({ accountId }: { accountId: number }) {
             </tr>
           </thead>
           <tbody>
-            {items.map((c) => (
-              <tr key={`${c.import_batch_id}:${c.account_ref}`} className="clickable"
-                onClick={() => navigate(`/import/${c.import_batch_id}`)}>
-                <td className="nowrap">{c.period_start ? `${shortDate(c.period_start)} – ${fullDate(c.period_end)}` : '—'}</td>
-                <td>{c.filename ?? `Import #${c.import_batch_id}`}</td>
-                <td className="num nowrap">
-                  {money(c.statement_total)}<div className="small text-muted">{c.statement_rows} rows</div>
+            {items.map((i, n) => (
+              <tr key={`${i.kind}:${i.import_batch_id ?? i.backfill_file_id ?? n}`}
+                className={[i.kind === 'missing' ? 'row-missing' : i.kind !== 'statement' ? 'row-pending' : '',
+                  i.import_batch_id || i.backfill_file_id ? 'clickable' : ''].join(' ')}
+                onClick={() => open(i)}>
+                <td className="nowrap">{periodText(i.period_start, i.period_end)}</td>
+                <td>
+                  {i.kind === 'missing' ? <span className="text-muted">{i.note}</span>
+                    : i.filename ?? (i.import_batch_id ? `Import #${i.import_batch_id}` : '—')}
+                  {i.kind !== 'missing' && i.note && <div className="small text-muted">{i.note}</div>}
                 </td>
                 <td className="num nowrap">
-                  {money(c.ledger_total)}<div className="small text-muted">{c.ledger_rows} transactions</div>
+                  {i.statement_total !== null ? (
+                    <>{money(i.statement_total)}<div className="small text-muted">{i.statement_rows} rows</div></>
+                  ) : '—'}
                 </td>
-                <td className="num nowrap">{Number(c.difference ?? 0) ? money(c.difference, true) : '—'}</td>
-                <td className="nowrap"><CheckStatusTag status={c.status} /></td>
+                <td className="num nowrap">
+                  {i.ledger_total !== null ? (
+                    <>{money(i.ledger_total)}<div className="small text-muted">{i.ledger_rows} transactions</div></>
+                  ) : '—'}
+                </td>
+                <td className="num nowrap">{Number(i.difference ?? 0) ? money(i.difference, true) : '—'}</td>
+                <td className="nowrap">
+                  {i.kind === 'statement' ? <CheckStatusTag status={i.status as CheckStatus} />
+                    : <span className={`tag ${i.kind === 'missing' ? 'tag-over' : 'tag-pace'}`}>{TIMELINE_LABEL[i.kind]}</span>}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -223,3 +223,29 @@ async def test_edge_transaction_on_another_statement_takes_its_date(client, monk
     assert (await client.get(f"/api/transactions/{diner}")).json()["txn_date"] == "2021-09-30"
     [sep_check] = (await client.get(f"/api/imports/{sep}/checks")).json()
     assert sep_check["status"] == "ok"
+
+
+async def test_account_timeline_shows_gaps_and_imports_in_progress(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Timeline", "mask": "6606"})).json()["id"]
+    months = [("01", "31", -11.01), ("02", "28", -12.02), ("03", "31", -13.03), ("06", "30", -16.06)]
+    for m, last, amt in months:
+        period = (f"2022-{m}-01", f"2022-{m}-{last}")
+        rows = [(f"2022-{m}-10", f"TIMELINE SHOP {m}", amt)]
+        bid = await _statement(client, monkeypatch, f"cov_tl_{m}.pdf", "6606", period, amt, rows)
+        await client.post(f"/api/imports/{bid}/commit", json={})
+    rows = [("2022-07-10", "TIMELINE SHOP 07", -17.07)]
+    review = await _statement(client, monkeypatch, "cov_tl_07.pdf", "6606", ("2022-07-01", "2022-07-31"), -17.07, rows)
+
+    items = (await client.get("/api/statement-checks/timeline", params={"account_id": acct})).json()
+    assert [(i["kind"], i["period_end"]) for i in items] == [
+        ("review", "2022-07-31"),
+        ("statement", "2022-06-30"),
+        ("missing", "2022-05-31"),
+        ("statement", "2022-03-31"),
+        ("statement", "2022-02-28"),
+        ("statement", "2022-01-31"),
+    ]
+    assert items[0]["import_batch_id"] == review
+    gap = items[2]
+    assert gap["period_start"] == "2022-04-01" and gap["estimated"] == 2
+    assert float(items[1]["statement_total"]) == float(items[1]["ledger_total"]) == -16.06

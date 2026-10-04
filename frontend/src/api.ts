@@ -234,6 +234,13 @@ export interface StatementCheckList {
   summary: Partial<Record<CheckStatus, number>>; statements: number; unchecked: number; job: Job | null; items: StatementCheckItem[]
   confident: number; auto_confidence: number
 }
+export interface StatementTimelineItem {
+  kind: 'statement' | 'review' | 'queued' | 'missing'
+  period_start: string | null; period_end: string | null
+  import_batch_id: number | null; backfill_file_id: number | null; filename: string | null; status: string | null
+  statement_total: string | null; ledger_total: string | null; difference: string | null
+  statement_rows: number | null; ledger_rows: number | null; note: string | null; estimated: number | null
+}
 
 export interface TxnPair {
   id: number; status: string; score: string; reasons: string[]; ai_probability: string | null; ai_reason: string | null

@@ -16,6 +16,7 @@ from ledger.imports.service import (
     rollback_batch,
     save_template,
 )
+from ledger.imports.timeline import account_timeline
 from ledger.jobs.worker import enqueue, notify_worker
 from ledger.models import (
     Account,
@@ -481,6 +482,12 @@ async def list_statement_checks(
         "job": JobOut.model_validate(job) if job else None,
         "items": items,
     }
+
+
+@router.get("/statement-checks/timeline")
+async def statement_timeline(account_id: int, session: AsyncSession = Depends(get_session)):
+    """One account's statements newest first, including ones being imported and gaps where one seems missing."""
+    return await account_timeline(session, account_id)
 
 
 @router.post("/statement-checks/run", response_model=JobOut, status_code=202)

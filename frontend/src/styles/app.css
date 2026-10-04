@@ -73,6 +73,8 @@ a:hover { color: var(--color-accent-900); }
 .fill-card > .fill-scroll > * { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: thin; }
 .table tbody tr.clickable { cursor: pointer; }
 .table tbody tr.selected { background: var(--color-accent-100); }
+.table tbody tr.row-missing { background: var(--color-over-bg); }
+.table tbody tr.row-pending { background: var(--color-pace-bg); }
 .table td.check, .table th.check { width: 28px; padding-right: 0; }
 .table tbody tr.group-row td { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
   color: var(--color-neutral-700); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
