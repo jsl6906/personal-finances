@@ -39,6 +39,7 @@ def _budget(b: Budget | None) -> dict | None:
         "amount": float(b.amount),
         "period_type": b.period_type,
         "monthly": float(b.amount) / PERIOD_MONTHS[b.period_type],
+        "notes": b.notes,
     }
 
 
@@ -391,6 +392,7 @@ async def group_detail(
                 "id": g.id,
                 "name": g.name,
                 "type": g.type,
+                "sort_order": g.sort_order,
                 "hide_from_reports": g.hide_from_reports,
             },
             "budget": _budget(await session.scalar(select(Budget).where(Budget.group_id == group_id))),

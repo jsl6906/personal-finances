@@ -154,6 +154,7 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
                 "scope": scope,
                 "name": name,
                 "group": group,
+                "category_ids": members,
                 "kind": kind,
                 "period_type": b.period_type,
                 "base_amount": b.amount,

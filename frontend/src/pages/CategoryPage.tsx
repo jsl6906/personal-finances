@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, useParams } from 'react-router-dom'
 import { get, put, type CategoryDetail } from '../api'
 import { MonthlyBars } from '../components/Charts'
-import { Breakdown, Findings, Kpis, RangeSeg, RenameCard, TxnList, YearTable } from '../components/Detail'
+import { Breakdown, BudgetCard, Findings, Kpis, RangeSeg, RenameCard, TxnList, YearTable } from '../components/Detail'
 import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, measure, rangeLabel, summarize, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso } from '../format'
@@ -23,6 +23,7 @@ function CategoryView({ id }: { id: number }) {
   })
   const qc = useQueryClient()
   const [renaming, setRenaming] = useState(false)
+  const [budgeting, setBudgeting] = useState(false)
   const rename = useMutation({
     mutationFn: (name: string) => {
       const { id: _id, group_name: _g, ...rest } = q.data!.category
@@ -56,6 +57,7 @@ function CategoryView({ id }: { id: number }) {
         </div>
         <div className="row">
           <RangeSeg value={r.range} onChange={r.setRange} />
+          <Button onClick={() => setBudgeting(!budgeting)}>{d.budget ? 'Edit budget' : 'Set budget'}</Button>
           <Button onClick={() => setRenaming(!renaming)}>Rename</Button>
         </div>
       </header>
@@ -64,6 +66,7 @@ function CategoryView({ id }: { id: number }) {
         <RenameCard initial={c.name} pending={rename.isPending} onSave={rename.mutate} onCancel={() => setRenaming(false)}
           meta="Transactions, rules and budgets follow the rename. The old name is kept as an import alias so files using it still map here." />
       )}
+      {budgeting && <BudgetCard budget={d.budget} target={{ category_id: id }} onDone={() => setBudgeting(false)} />}
 
       <Kpis items={[
         { k: 'This month', v: money(sum.current),
@@ -71,7 +74,8 @@ function CategoryView({ id }: { id: number }) {
         { k: `Average / month`, v: money(sum.avg), m: rangeLabel(d.start, d.end) },
         { k: 'Last 12 months', v: money(sum.last12), m: `${money(sum.total)} ${verb} in range` },
         { k: 'Budget', v: d.budget ? money(d.budget.amount) : '—',
-          m: d.budget ? `per ${d.budget.period_type}${d.budget.period_type !== 'month' ? ` · ${money(d.budget.monthly)}/mo` : ''}` : <Link to="/budgets">Set a budget</Link> },
+          m: d.budget ? `per ${d.budget.period_type}${d.budget.period_type !== 'month' ? ` · ${money(d.budget.monthly)}/mo` : ''}`
+            : <button type="button" className="link-btn" onClick={() => setBudgeting(true)}>Set a budget</button> },
       ]} />
 
       <Card>

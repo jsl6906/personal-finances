@@ -1,4 +1,5 @@
 /* App layout built on the Industry tokens (industry.css); ported from design_docs/Ledger.dc.html. */
+:root { --color-over: #a8433c; --color-over-bg: #f8e6e4; --color-pace: #96690f; --color-pace-bg: #f7ecd3; }
 html, body { margin: 0; min-height: 100vh; }
 a { color: var(--color-accent-700); }
 a:hover { color: var(--color-accent-900); }
@@ -94,6 +95,21 @@ a:hover { color: var(--color-accent-900); }
   border: 1px solid var(--color-accent-300); background: var(--color-accent-100); font-size: 13px; }
 .progress { height: 8px; border: 1px solid var(--color-divider); position: relative; }
 .progress > div { position: absolute; inset: 0; background: var(--color-accent-400); }
+.text-over { color: var(--color-over); font-weight: 600; }
+.tag-over { background: var(--color-over-bg); color: var(--color-over); font-weight: 600; }
+.tag-pace { background: var(--color-pace-bg); color: var(--color-pace); font-weight: 600; }
+.budget-bar { height: 10px; }
+.budget-bar.pace > div { background: var(--color-pace); }
+.budget-bar.over > div { background: var(--color-over); }
+.budget-bar > .elapsed { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--color-text); }
+.budget-summary { gap: var(--space-3); }
+.budget-summary-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+.budget-summary .of { font-size: 16px; color: var(--color-neutral-600); }
+.budget-table .b-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 500; }
+.budget-table .b-title .tag { padding: 1px 6px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+.budget-table tr.over { background: color-mix(in srgb, var(--color-over) 5%, transparent); }
+.budget-table tr.over > td:first-child { box-shadow: inset 3px 0 0 var(--color-over); }
+.budget-table tr.pace > td:first-child { box-shadow: inset 3px 0 0 var(--color-pace); }
 .chip { cursor: pointer; user-select: none; border: 1px solid var(--color-divider); background: transparent; font: inherit; }
 .chip.on { background: var(--color-accent-100); color: var(--color-accent-800); border-color: var(--color-accent-300); }
 select.input { appearance: auto; }
@@ -208,6 +224,30 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 
   .budget-row { grid-template-columns: minmax(0, 1fr) auto; }
   .budget-row > .progress { grid-column: 1 / -1; grid-row: 2; }
+
+  /* Budget table rows become stacked cards: name/actions, full-width bar, then labelled amounts. */
+  .budget-table thead { display: none; }
+  .budget-table, .budget-table tbody, .budget-table tr:not(.b-row), .budget-table tr:not(.b-row) > td { display: block; }
+  .budget-table tr.b-row {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; padding: 12px var(--space-3);
+    grid-template-areas: "name name act" "bar bar bar" "spent budget left";
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  }
+  .budget-table tr.b-row > td { padding: 0; border: 0; text-align: left; min-width: 0; }
+  .budget-table tr.b-row > td:first-child { box-shadow: none; }
+  .budget-table tr.b-row.over { box-shadow: inset 4px 0 0 var(--color-over); }
+  .budget-table tr.b-row.pace { box-shadow: inset 4px 0 0 var(--color-pace); }
+  .budget-table .b-name { grid-area: name; }
+  .budget-table .b-bar { grid-area: bar; }
+  .budget-table .b-spent { grid-area: spent; font-weight: 600; }
+  .budget-table .b-budget { grid-area: budget; }
+  .budget-table tr.b-row > td.b-left { grid-area: left; text-align: right; }
+  .budget-table tr.b-row > td.b-act { grid-area: act; align-self: start; margin: -6px -8px 0 0; }
+  .budget-table td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px; font-size: 10px; font-weight: 400;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-neutral-600);
+  }
+  .budget-bar { height: 12px; }
 
   .table-foot { flex-wrap: wrap; gap: var(--space-2); }
   /* Let wide tables scroll inside their card instead of widening the page; corners would add a vertical scrollbar. */

@@ -1,18 +1,33 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { del, get, post, put, type Budget, type BudgetStatus, type BudgetSuggestion, type PeriodType, type SpreadRule } from '../api'
+import { del, get, post, put, type Budget, type BudgetRow, type BudgetStatus, type BudgetSuggestion, type PeriodType, type SpreadRule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { TableCard } from '../components/Detail'
 import { Button, Card, ErrorNote, Field, Seg } from '../components/ui'
 import { iso, money, parseIso } from '../format'
 import { useGroups } from '../hooks'
-import { categoryPath, groupPath } from '../links'
+import { categoryPath, txnsPath } from '../links'
 
 function shift(on: string, period: PeriodType, dir: number): string {
   const d = parseIso(on)
   const months = period === 'month' ? 1 : period === 'quarter' ? 3 : 12
   return iso(new Date(d.getFullYear(), d.getMonth() + dir * months, 1))
 }
+
+function BudgetBar({ pct, elapsed, status }: { pct: number; elapsed: number; status: BudgetRow['status'] }) {
+  return (
+    <div className={`progress budget-bar ${status}`}>
+      <div style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+      {elapsed > 0 && elapsed < 1 && <span className="elapsed" style={{ left: `${elapsed * 100}%` }} title="Time elapsed in period" />}
+    </div>
+  )
+}
+
+const STATUS_TAG: Record<BudgetRow['status'], [string, string] | null> = {
+  over: ['tag-over', 'Over'], pace: ['tag-pace', 'At risk'], ok: null,
+}
+const STATUS_RANK: Record<BudgetRow['status'], number> = { over: 0, pace: 1, ok: 2 }
 
 export function Budgets() {
   const qc = useQueryClient()
@@ -30,6 +45,11 @@ export function Budgets() {
   const hasOverall = (budgets.data ?? []).some((b) => !b.category_id && !b.group_id)
 
   const elapsed = s?.period.elapsed ?? 0
+  const rows = [...(s?.rows ?? [])].sort((a, b) =>
+    Number(a.kind !== 'expense') - Number(b.kind !== 'expense') || STATUS_RANK[a.status] - STATUS_RANK[b.status])
+  const expense = rows.filter((r) => r.kind === 'expense')
+  const counts = { over: 0, pace: 0, ok: 0 }
+  for (const r of expense) counts[r.status] += 1
   return (
     <section className="page">
       <header className="page-header">
@@ -52,14 +72,38 @@ export function Budgets() {
       <ErrorNote error={status.error || remove.error} />
       <div className="grid-main-side">
         <div className="stack-3" style={{ minWidth: 0 }}>
-          <Card className="table-card">
-            <table className="table">
+          {s && s.total.count > 0 && (
+            <Card className="budget-summary">
+              <div className="budget-summary-head">
+                <div>
+                  <div className="card-kicker">Expense budgets · {s.period.label}</div>
+                  <div className="kpi-value">{money(s.total.spent)} <span className="of">of {money(s.total.budget)}</span></div>
+                  <div className={`small ${s.total.left < 0 ? 'text-over' : 'text-muted'}`} style={{ marginTop: 4 }}>
+                    {s.total.left < 0 ? `Over by ${money(-s.total.left)}` : `${money(s.total.left)} remaining`}
+                  </div>
+                </div>
+                <div className="row">
+                  {counts.over > 0 && <span className="tag tag-over">{counts.over} over</span>}
+                  {counts.pace > 0 && <span className="tag tag-pace">{counts.pace} at risk</span>}
+                  {counts.ok > 0 && <span className="tag tag-neutral">{counts.ok} on track</span>}
+                </div>
+              </div>
+              <BudgetBar pct={s.total.budget ? (s.total.spent / s.total.budget) * 100 : 0} elapsed={elapsed}
+                status={s.total.left < 0 ? 'over' : 'ok'} />
+            </Card>
+          )}
+          <TableCard foot={
+            <div className="table-foot">
+              <Button variant="ghost" onClick={() => setEditing('new')} disabled={editing === 'new'}>Add budget</Button>
+            </div>
+          }>
+            <table className="table budget-table">
               <thead>
                 <tr><th>Category</th><th style={{ width: '32%' }}>Progress</th><th style={{ textAlign: 'right' }}>Spent</th>
                   <th style={{ textAlign: 'right' }}>Budget</th><th style={{ textAlign: 'right' }}>Left</th><th /></tr>
               </thead>
               <tbody>
-                {(s?.rows ?? []).map((r) => {
+                {rows.map((r) => {
                   const b = budgets.data?.find((x) => x.id === r.budget_id)
                   if (editing === r.budget_id && b) {
                     return <BudgetEditor key={r.budget_id} budget={b} hasOverall={hasOverall} onDone={() => { setEditing(null); refresh() }} />
@@ -69,30 +113,27 @@ export function Budgets() {
                     r.allocated ? `${money(r.total_budget)} less ${money(r.allocated)} budgeted elsewhere` : '',
                     r.spread_amount ? `incl. ${money(r.spread_amount)} spread` : '',
                     r.status === 'pace' ? `on pace for ${money(r.projected)}` : '', r.notes].filter(Boolean).join(' · ')
+                  const tag = STATUS_TAG[r.status]
+                  const txns = s && r.category_ids.length ? txnsPath({
+                    ...(r.category_id ? { category: r.category_id } : { categories: r.category_ids, label: `${r.name} · ${s.period.label}` }),
+                    start: s.period.start, end: s.period.end,
+                  }) : null
                   return (
-                    <tr key={r.budget_id}>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>
-                          {r.category_id ? <Link to={categoryPath(r.category_id)}>{r.name}</Link>
-                            : r.group_id ? <Link to={groupPath(r.group_id)}>{r.name}</Link> : r.name}
+                    <tr key={r.budget_id} className={`b-row ${r.status}`}>
+                      <td className="b-name">
+                        <div className="b-title">
+                          {txns ? <Link to={txns} title={`Transactions · ${s?.period.label}`}>{r.name}</Link> : r.name}
+                          {tag && <span className={`tag ${tag[0]}`}>{tag[1]} · {Math.round(r.pct)}%</span>}
                         </div>
-                        <div className="small muted-2">{note}</div>
+                        {note && <div className="small muted-2">{note}</div>}
                       </td>
-                      <td>
-                        <div className="progress" style={{ position: 'relative' }}>
-                          <div style={{ width: `${Math.min(100, r.pct)}%`, background: over ? 'var(--color-accent-700)' : 'var(--color-accent-400)' }} />
-                          {elapsed > 0 && elapsed < 1 && (
-                            <span style={{ position: 'absolute', left: `${elapsed * 100}%`, top: -3, bottom: -3, width: 1, background: 'var(--color-text)' }}
-                              title="Time elapsed in period" />
-                          )}
-                        </div>
+                      <td className="b-bar"><BudgetBar pct={r.pct} elapsed={elapsed} status={r.status} /></td>
+                      <td className="num b-spent" data-label="Spent">{money(r.actual)}</td>
+                      <td className="num text-muted b-budget" data-label="Budget">{money(r.budget)}</td>
+                      <td className={`num b-left${over ? ' text-over' : ''}`} data-label={over ? 'Over by' : 'Left'}>
+                        {over ? <>{money(-r.left)}<span className="hide-sm"> over</span></> : money(r.left)}
                       </td>
-                      <td className="num">{money(r.actual)}</td>
-                      <td className="num text-muted">{money(r.budget)}</td>
-                      <td className="num" style={{ color: over ? 'var(--color-accent-700)' : undefined, fontWeight: over ? 600 : undefined }}>
-                        {money(r.left)}
-                      </td>
-                      <td className="nowrap" style={{ textAlign: 'right' }}>
+                      <td className="nowrap b-act" style={{ textAlign: 'right' }}>
                         <Button variant="ghost" className="small" onClick={() => setEditing(r.budget_id)}>Edit</Button>
                         <Button variant="ghost" className="small" onClick={() => confirm(`Remove the ${r.name} budget?`) && remove.mutate(r.budget_id)}>×</Button>
                       </td>
@@ -105,10 +146,7 @@ export function Budgets() {
                 )}
               </tbody>
             </table>
-            <div className="table-foot">
-              <Button variant="ghost" onClick={() => setEditing('new')} disabled={editing === 'new'}>Add budget</Button>
-            </div>
-          </Card>
+          </TableCard>
           {s && s.unbudgeted.length > 0 && (
             <Card style={{ gap: 'var(--space-2)' }}>
               <div className="card-kicker">Unbudgeted spending · {s.period.label}</div>
@@ -123,15 +161,6 @@ export function Budgets() {
           )}
         </div>
         <div className="stack-3">
-          {s && (
-            <Card style={{ gap: 4 }}>
-              <div className="card-kicker">Total · expense budgets</div>
-              <div className="kpi-value">{money(s.total.spent)} <span style={{ fontSize: 16, color: 'var(--color-neutral-600)' }}>of {money(s.total.budget)}</span></div>
-              <div className="card-meta">
-                {s.total.left < 0 ? `Over by ${money(-s.total.left)}` : `${money(s.total.left)} remaining`} · {s.total.over_count} of {s.total.count} over
-              </div>
-            </Card>
-          )}
           <SpreadRules />
           <Suggestions onAdded={refresh} />
         </div>

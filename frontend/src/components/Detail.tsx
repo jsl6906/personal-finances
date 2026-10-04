@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { get, type Anomaly, type BreakdownRow, type EntityYear, type TransactionPage } from '../api'
+import {
+  del, get, post, put, type Anomaly, type BreakdownRow, type BudgetInfo, type EntityYear, type PeriodType, type TransactionPage,
+} from '../api'
 import type { DetailRange } from '../detail'
 import { iso, money, monthLabel, parseIso, shortDate } from '../format'
 import { accountPath, categoryPath, txnPath } from '../links'
 import { AnomalyList } from './AnomalyList'
-import { Button, Card, Seg } from './ui'
+import { Button, Card, ErrorNote, Field, Seg } from './ui'
 
 export function RangeSeg({ value, onChange }: { value: DetailRange; onChange: (r: DetailRange) => void }) {
   return (
@@ -72,6 +74,56 @@ export function RenameCard({ initial, pending, onSave, onCancel, meta }: {
         <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
       </form>
       {meta && <div className="card-meta">{meta}</div>}
+    </Card>
+  )
+}
+
+export function BudgetCard({ budget, target, meta, onDone }: {
+  budget: BudgetInfo | null; target: { category_id: number } | { group_id: number }; meta?: ReactNode; onDone: () => void
+}) {
+  const qc = useQueryClient()
+  const [amount, setAmount] = useState(budget ? String(budget.amount) : '')
+  const [period, setPeriod] = useState<PeriodType>(budget?.period_type ?? 'month')
+  const [notes, setNotes] = useState(budget?.notes ?? '')
+  const finish = () => {
+    for (const k of ['details', 'budgets']) qc.invalidateQueries({ queryKey: [k] })
+    onDone()
+  }
+  const save = useMutation({
+    mutationFn: () => {
+      const body = { category_id: null, group_id: null, ...target, period_type: period, amount: Number(amount).toFixed(2), notes: notes.trim() || null }
+      return budget ? put(`/budgets/${budget.id}`, body) : post('/budgets', body)
+    },
+    onSuccess: finish,
+  })
+  const remove = useMutation({ mutationFn: () => del(`/budgets/${budget!.id}`), onSuccess: finish })
+  const valid = Number(amount) > 0
+  return (
+    <Card style={{ gap: 'var(--space-2)' }}>
+      <div className="card-kicker">{budget ? 'Edit budget' : 'Set a budget'}</div>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); if (valid) save.mutate() }}>
+        <div className="grid-form" style={{ alignItems: 'end' }}>
+          <Field label="Amount">
+            <input className="input" type="number" min="0" step="0.01" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="Per">
+            <select className="input" value={period} onChange={(e) => setPeriod(e.target.value as PeriodType)}>
+              <option value="month">Month</option><option value="quarter">Quarter</option><option value="year">Year</option>
+            </select>
+          </Field>
+          <Field label="Notes"><input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+        </div>
+        <ErrorNote error={save.error || remove.error} />
+        <div className="row">
+          <Button variant="primary" type="submit" disabled={!valid || save.isPending}>Save</Button>
+          <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
+          {budget && (
+            <Button type="button" variant="ghost" style={{ marginLeft: 'auto' }} disabled={remove.isPending}
+              onClick={() => confirm('Remove this budget?') && remove.mutate()}>Remove budget</Button>
+          )}
+        </div>
+      </form>
+      <div className="card-meta">{meta}{meta && ' '}<Link to="/budgets">All budgets</Link></div>
     </Card>
   )
 }

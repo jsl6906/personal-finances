@@ -194,8 +194,8 @@ export function Dashboard() {
             <div key={r.budget_id} className="budget-row">
               <div>{r.category_id ? <Link to={categoryPath(r.category_id)}>{r.name}</Link>
                 : r.group_id ? <Link to={groupPath(r.group_id)}>{r.name}</Link> : r.name}</div>
-              <div className="progress"><div style={{ width: `${Math.min(100, r.pct)}%`, background: r.status === 'over' ? 'var(--color-accent-700)' : 'var(--color-accent-400)' }} /></div>
-              <div className="nowrap" style={{ fontVariantNumeric: 'tabular-nums', color: r.status === 'over' ? 'var(--color-accent-700)' : undefined }}>
+              <div className={`progress budget-bar ${r.status}`}><div style={{ width: `${Math.min(100, r.pct)}%` }} /></div>
+              <div className={`nowrap${r.status === 'over' ? ' text-over' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {moneyRound(r.actual)} / {moneyRound(r.budget)}
               </div>
             </div>

@@ -18,13 +18,21 @@ export function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams()
   const batchId = searchParams.get('batch') ? Number(searchParams.get('batch')) : null
   const ruleId = searchParams.get('rule') ? Number(searchParams.get('rule')) : null
+  const urlCats = useMemo(() => (searchParams.get('categories') ?? '').split(',').filter(Boolean).map(Number), [searchParams])
+  const urlLabel = searchParams.get('label')
+  const dropParams = (...keys: string[]) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev)
+    for (const k of keys) next.delete(k)
+    return next
+  })
   const accounts = useAccounts()
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
   const q = useDebounced(search)
   const [status, setStatus] = useState<Status>('all')
-  const [period, setPeriod] = useState<PeriodKey>(batchId || ruleId || searchParams.get('q') ? 'all' : 'last_90')
-  const [dateStart, setDateStart] = useState('')
-  const [dateEnd, setDateEnd] = useState('')
+  const [period, setPeriod] = useState<PeriodKey>(searchParams.get('start') || searchParams.get('end') ? 'custom'
+    : batchId || ruleId || searchParams.get('q') ? 'all' : 'last_90')
+  const [dateStart, setDateStart] = useState(() => searchParams.get('start') ?? '')
+  const [dateEnd, setDateEnd] = useState(() => searchParams.get('end') ?? '')
   const [accountId, setAccountId] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState<number | null>(() =>
     searchParams.get('category') ? Number(searchParams.get('category')) : null)
@@ -39,7 +47,8 @@ export function Transactions() {
     ? { start: dateStart || undefined, end: dateEnd || undefined }
     : periodRange(period)
   const params = {
-    q, status, ...range, account_id: accountId ?? undefined, category_id: categoryId ?? undefined, limit: PAGE, offset,
+    q, status, ...range, account_id: accountId ?? undefined,
+    category_id: categoryId ?? (urlCats.length ? urlCats : undefined), limit: PAGE, offset,
     import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
   }
   const resetPage = () => {
@@ -159,7 +168,13 @@ export function Transactions() {
           <option value="">All accounts</option>
           {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        <CategorySelect className="input compact" value={categoryId} onChange={onFilter(setCategoryId)} emptyLabel="All categories" />
+        <CategorySelect className="input compact" value={categoryId} emptyLabel="All categories"
+          onChange={(v) => { if (urlCats.length) dropParams('categories', 'label'); onFilter(setCategoryId)(v) }} />
+        {urlCats.length > 0 && (
+          <button className="tag tag-outline chip" onClick={() => { dropParams('categories', 'label'); resetPage() }}>
+            {urlLabel ?? `${urlCats.length} categories`} ×
+          </button>
+        )}
         {batchId && (
           <button className="tag tag-outline chip" onClick={() => { setSearchParams({}); resetPage() }}>
             Import #{batchId} ×

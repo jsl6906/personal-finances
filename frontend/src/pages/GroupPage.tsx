@@ -1,10 +1,11 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { get, type GroupDetail } from '../api'
+import { get, put, type GroupDetail } from '../api'
 import { seriesColor } from '../chartUtils'
 import { Legend, MonthlyBars, TrendChart } from '../components/Charts'
-import { Breakdown, Findings, Kpis, RangeSeg, TxnList, YearTable } from '../components/Detail'
-import { Card, ErrorNote } from '../components/ui'
+import { Breakdown, BudgetCard, Findings, Kpis, RangeSeg, RenameCard, TxnList, YearTable } from '../components/Detail'
+import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, measure, rangeLabel, summarize, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso } from '../format'
 import { categoryPath, merchantPath } from '../links'
@@ -21,6 +22,19 @@ function GroupView({ id }: { id: number }) {
     queryKey: ['details', 'group', id, r.start],
     queryFn: () => get<GroupDetail>(`/category-groups/${id}/detail`, { start: r.start }),
     placeholderData: keepPreviousData,
+  })
+  const [budgeting, setBudgeting] = useState(false)
+  const qc = useQueryClient()
+  const [renaming, setRenaming] = useState(false)
+  const rename = useMutation({
+    mutationFn: (name: string) => {
+      const { id: _id, ...rest } = q.data!.group
+      return put(`/category-groups/${id}`, { ...rest, name })
+    },
+    onSuccess: () => {
+      setRenaming(false)
+      for (const k of ['details', 'category-groups', 'categories', 'transactions', 'analytics', 'budgets', 'rules']) qc.invalidateQueries({ queryKey: [k] })
+    },
   })
   const d = q.data
   if (q.error) return <section className="page"><ErrorNote error={q.error} /></section>
@@ -46,15 +60,29 @@ function GroupView({ id }: { id: number }) {
             <span>{d.categories.length} categories · {d.stats.count.toLocaleString()} transactions since {fullDate(d.stats.first_date)}</span>
           </div>
         </div>
-        <RangeSeg value={r.range} onChange={r.setRange} />
+        <div className="row">
+          <RangeSeg value={r.range} onChange={r.setRange} />
+          <Button onClick={() => setBudgeting(!budgeting)}>{d.budget ? 'Edit budget' : 'Set budget'}</Button>
+          <Button onClick={() => setRenaming(!renaming)}>Rename</Button>
+        </div>
       </header>
+      <ErrorNote error={rename.error} />
+      {renaming && (
+        <RenameCard initial={g.name} pending={rename.isPending} onSave={rename.mutate} onCancel={() => setRenaming(false)}
+          meta="Categories, budgets and reports follow the rename." />
+      )}
+      {budgeting && (
+        <BudgetCard budget={d.budget} target={{ group_id: id }} onDone={() => setBudgeting(false)}
+          meta={catBudgets ? `Covers the whole group, including the ${money(catBudgets)}/mo already budgeted on its categories.` : undefined} />
+      )}
 
       <Kpis items={[
         { k: 'This month', v: money(sum.current), m: budget ? `${Math.round((sum.current / budget) * 100)}% of ${money(budget)} budget` : 'No budget' },
         { k: 'Average / month', v: money(sum.avg), m: rangeLabel(d.start, d.end) },
         { k: 'Last 12 months', v: money(sum.last12), m: `${money(sum.total)} in range` },
         { k: 'Budget / month', v: budget ? money(budget) : '—',
-          m: d.budget ? `group budget per ${d.budget.period_type}` : catBudgets ? 'sum of category budgets' : <Link to="/budgets">Set a budget</Link> },
+          m: d.budget ? `group budget per ${d.budget.period_type}` : catBudgets ? 'sum of category budgets'
+            : <button type="button" className="link-btn" onClick={() => setBudgeting(true)}>Set a budget</button> },
       ]} />
 
       <Card>

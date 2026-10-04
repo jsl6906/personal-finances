@@ -355,7 +355,7 @@ export interface BreakdownRow {
 }
 export interface Charge { id: number; date: string; amount: number; description: string; account: string | null }
 export interface Cadence { label: string; days: number; next_date: string; typical_amount: number | null; lapsed: boolean }
-export interface BudgetInfo { id: number; amount: number; period_type: PeriodType; monthly: number }
+export interface BudgetInfo { id: number; amount: number; period_type: PeriodType; monthly: number; notes: string | null }
 interface EntityDetail { start: string; end: string; stats: EntityStats; monthly: EntityMonth[]; yearly: EntityYear[] }
 interface CategoryLinks {
   bill_series: { id: number; name: string }[]; spread_rules: { id: number; name: string; months: number }[]; category_rules: number
@@ -384,7 +384,7 @@ export interface CategoryDetail extends EntityDetail, CategoryLinks {
   budget: BudgetInfo | null; merchants: BreakdownRow[]; accounts: BreakdownRow[]
 }
 export interface GroupDetail extends EntityDetail, CategoryLinks {
-  group: { id: number; name: string; type: CategoryType; hide_from_reports: boolean }
+  group: { id: number; name: string; type: CategoryType; sort_order: number; hide_from_reports: boolean }
   budget: BudgetInfo | null
   categories: {
     id: number; name: string; is_active: boolean; budget: BudgetInfo | null; spent: number; received: number; net: number
@@ -411,7 +411,7 @@ export interface Budget {
 }
 export interface BudgetRow {
   budget_id: number; category_id: number | null; group_id: number | null; scope: 'category' | 'group' | 'overall'
-  name: string; group: string | null
+  name: string; group: string | null; category_ids: number[]
   kind: string; period_type: PeriodType; base_amount: number; total_budget: number; allocated: number; budget: number
   actual: number; left: number
   pct: number; projected: number; spread_amount: number; notes: string | null; status: 'ok' | 'pace' | 'over'
