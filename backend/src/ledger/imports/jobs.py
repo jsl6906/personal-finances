@@ -6,9 +6,10 @@ from sqlalchemy import select
 
 from ledger.config import get_settings
 from ledger.db.engine import get_sessionmaker
+from ledger.db.filters import id_in
 from ledger.imports.service import extract_into_batch, prepare_batch
-from ledger.jobs.worker import JobContext, job_handler
-from ledger.models import DuplicatePair, ImportBatch
+from ledger.jobs.worker import JobContext, enqueue, job_handler, notify_worker
+from ledger.models import DuplicatePair, ImportBatch, Transaction
 from ledger.services.dedupe import adjudicate_pending, scan_transactions
 
 log = logging.getLogger(__name__)
@@ -53,9 +54,24 @@ async def prepare_import_job(ctx: JobContext) -> dict:
 async def statement_checks_job(ctx: JobContext) -> dict:
     from ledger.imports.coverage import check_all
 
+    apply = bool(ctx.payload.get("apply"))
     async with get_sessionmaker()() as session:
         await ctx.progress(0.01, "Comparing statements with the ledger")
-        return await check_all(session, progress=ctx.progress)
+        result = await check_all(session, progress=ctx.progress, apply=apply)
+        new_ids = result.pop("new_ids")
+        if result.get("fixed"):
+            if new_ids and get_settings().gemini_key:
+                uncategorized = (
+                    await session.scalars(
+                        select(Transaction.id).where(id_in(Transaction.id, new_ids), Transaction.category_id.is_(None))
+                    )
+                ).all()
+                if uncategorized:
+                    await enqueue(session, "categorize", {"ids": list(uncategorized)})
+            await enqueue(session, "detect_anomalies", {})
+            await session.commit()
+            notify_worker()
+        return result
 
 
 @job_handler("dup_scan")

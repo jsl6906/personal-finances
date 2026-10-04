@@ -457,9 +457,9 @@ async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: st
     batch.status, batch.committed_at = "committed", now
     await session.flush()
     if batch.source_type == "document":
-        from ledger.imports.coverage import save_checks
+        from ledger.imports.coverage import auto_fix
 
-        await save_checks(session, batch)
+        new_ids += (await auto_fix(session, batch))["new_ids"]
     uncategorized = (
         (
             await session.scalars(

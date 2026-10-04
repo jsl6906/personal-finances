@@ -29,6 +29,9 @@ export function CheckStatusTag({ status }: { status: CheckStatus }) {
 }
 
 const keyOf = (i: CheckIssue) => `${i.fix}:${i.row_id ?? ''}:${i.transaction_id ?? ''}`
+// Mirrors coverage.AUTO_CONFIDENCE: suggested fixes this confident are applied when a statement is committed.
+const AUTO_CONFIDENCE = 90
+const isAuto = (i: CheckIssue) => !!i.fix && i.suggested && (i.confidence ?? 0) >= AUTO_CONFIDENCE
 
 /** Statement vs. ledger for each account on a statement, with fixes to apply (import review step). */
 export function StatementChecks({ b }: { b: BatchDetail }) {
@@ -178,7 +181,14 @@ function AccountCheck({ b, c, multi, onApplied }: {
                       ) : <span className="text-muted">—</span>}
                     </td>
                     <td className="num nowrap">{Number(i.effect) ? money(i.effect, true) : '—'}</td>
-                    <td className="nowrap small">{i.fix ? FIX_LABEL[i.fix] : '—'}</td>
+                    <td className="nowrap small">
+                      {i.fix ? FIX_LABEL[i.fix] : '—'}
+                      {i.fix && i.confidence != null && (
+                        <div className="text-muted" title={isAuto(i) ? 'Confident enough to apply without review' : undefined}>
+                          {i.confidence}% confident{isAuto(i) ? ' · auto' : ''}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -190,6 +200,8 @@ function AccountCheck({ b, c, multi, onApplied }: {
                 Selected fixes change the ledger by {money(change, true)}; remaining difference {money(remaining)}.
                 {before ? ' Adds and links adjust this import’s rows;' : ''} removals, amount and date corrections change
                 existing transactions now and leave a note on them.
+                {before && fixable.some(isAuto)
+                  ? ` Fixes marked “auto” (${AUTO_CONFIDENCE}%+) are applied anyway when the statement is committed.` : ''}
               </span>
               <Button variant="primary" disabled={!chosen.length || apply.isPending}
                 onClick={() => confirm(`Apply ${chosen.length} fix${chosen.length === 1 ? '' : 'es'} to the ledger?`)
@@ -231,12 +243,13 @@ export function StatementChecksPanel() {
     }
   }, [finished, qc])
   const run = useMutation({
-    mutationFn: () => post<Job>('/statement-checks/run'),
+    mutationFn: (apply: boolean) => post<Job>(`/statement-checks/run${apply ? '?apply=true' : ''}`),
     onSuccess: (j) => setJobId(j.id),
   })
   const s = list.data?.summary ?? {}
   const total = (s.ok ?? 0) + (s.explained ?? 0) + (s.mismatch ?? 0) + (s.unverified ?? 0)
   const items = list.data?.items ?? []
+  const confident = list.data?.confident ?? 0
 
   return (
     <Card style={{ gap: 'var(--space-3)' }}>
@@ -253,9 +266,17 @@ export function StatementChecksPanel() {
             {list.data?.unchecked ? ` ${list.data.unchecked} statements haven’t been checked yet.` : ''}
           </div>
         </div>
-        <Button disabled={running || run.isPending} onClick={() => run.mutate()}>
-          {running ? 'Checking…' : 'Check all statements'}
-        </Button>
+        <div className="row" style={{ gap: 'var(--space-2)' }}>
+          <Button variant="primary" disabled={running || run.isPending || !confident}
+            title={`Re-check every statement and apply the suggested fixes that are ${list.data?.auto_confidence ?? 90}%+ confident`}
+            onClick={() => confirm(`Re-check every statement and apply about ${confident} high-confidence fix`
+              + `${confident === 1 ? '' : 'es'}? Each change leaves a note on the transaction.`) && run.mutate(true)}>
+            Apply confident fixes ({confident})
+          </Button>
+          <Button disabled={running || run.isPending} onClick={() => run.mutate(false)}>
+            {running ? 'Checking…' : 'Check all statements'}
+          </Button>
+        </div>
       </div>
       {running && (
         <div className="stack" style={{ gap: 4 }}>
@@ -292,6 +313,7 @@ export function StatementChecksPanel() {
                 <td className="small">
                   <CheckStatusTag status={c.status} />{' '}
                   {Object.entries(c.issue_counts).map(([k, n]) => `${n} ${KIND_LABEL[k as CheckIssue['kind']]?.toLowerCase() ?? k}`).join(' · ')}
+                  {c.confident > 0 && <span className="text-muted"> · {c.confident} confident</span>}
                   {c.message && <div className="text-muted">{c.message}</div>}
                 </td>
               </tr>

@@ -44,6 +44,7 @@ EDGE_DAYS = 3  # ledger rows this close to a period edge may belong to the neigh
 SIMILAR = 0.6
 CENT = Decimal("0.005")
 ACTIONABLE = ("missing", "extra", "amount", "link")
+AUTO_CONFIDENCE = 90  # suggested fixes at least this confident are applied without review
 
 
 @dataclass
@@ -116,6 +117,7 @@ def _issue(
     effect: Decimal,
     hint: str | None = None,
     suggested: bool | None = None,
+    confidence: int = 0,
 ) -> dict:
     return {
         "kind": kind,
@@ -129,6 +131,8 @@ def _issue(
         "hint": hint,
         # Pre-selected in the review; None = decided once the whole account is checked.
         "suggested": suggested,
+        # Percent; capped once the whole account is checked by how far the statement itself can be trusted.
+        "confidence": confidence if fix else 0,
     }
 
 
@@ -331,14 +335,16 @@ async def _check_account(
         if t.id not in claimed and t.id not in others and t.amount == s.amount and _gap(s, t) <= MATCH_DAYS
     )
     by_index = {s.index: s for s in open_rows}
-    for gap, _, _, idx, tid in cands:
+    for gap, neg_sim, _, idx, tid in cands:
         s = by_index[idx]
         if s.id in matched or tid in claimed:
             continue
         pair(s, L[tid])
         if s.incoming:
             hint = f"Same amount {'on the same day' if gap == 0 else f'{gap} days apart'}; no other statement row matches it"
-            issues.append(_issue("link", "link", s, L[tid], -s.amount, hint))
+            similar = -neg_sim >= SIMILAR
+            conf = 97 if gap == 0 and similar else 92 if gap == 0 or (gap <= 2 and similar) else 80
+            issues.append(_issue("link", "link", s, L[tid], -s.amount, hint, confidence=conf))
 
     # Same payee and sign, different amount.
     open_rows = [s for s in open_rows if s.id not in matched]
@@ -350,7 +356,7 @@ async def _check_account(
             sim = _sim(s.description, s.merchant, t.description, t.merchant)
             if sim >= SIMILAR:
                 cands.append((_gap(s, t), -sim, s.index, t.id))
-    for _, _, idx, tid in sorted(cands):
+    for gap, neg_sim, idx, tid in sorted(cands):
         s = by_index[idx]
         if s.id in matched or tid in claimed:
             continue
@@ -358,21 +364,21 @@ async def _check_account(
         pair(s, t)
         # Before commit the row also stops being inserted.
         effect = (s.amount - t.amount) - (s.amount if s.incoming else 0)
-        issues.append(
-            _issue("amount", "amount", s, t, effect, f"Ledger has {_money(t.amount)}, the statement {_money(s.amount)}")
-        )
+        conf = 85 if gap == 0 and -neg_sim >= 0.999 else 75 if -neg_sim >= 0.8 else 65
+        hint = f"Ledger has {_money(t.amount)}, the statement {_money(s.amount)}"
+        issues.append(_issue("amount", "amount", s, t, effect, hint, confidence=conf))
 
     for s in S:
         if s.id in matched or s.id in away or s.incoming:
             continue
-        hint = None
+        hint, conf = None, 90
         if s.link and s.link in claimed:
             hint = f"Was linked to the same transaction as statement row {claimed[s.link].index + 1}"
         elif s.id in cross:
-            hint = f"Marked a duplicate of a transaction in {cross_names.get(cross[s.id])}"
+            hint, conf = f"Marked a duplicate of a transaction in {cross_names.get(cross[s.id])}", 50
         elif s.link:
-            hint = "Was linked to a transaction that has since been deleted"
-        issues.append(_issue("missing", "add", s, None, s.amount, hint))
+            hint, conf = "Was linked to a transaction that has since been deleted", 60
+        issues.append(_issue("missing", "add", s, None, s.amount, hint, confidence=conf))
 
     free = [t for t in L.values() if t.id not in claimed and ps <= t.date <= pe]
     away_rows = [s for s in S if s.id in away]
@@ -380,9 +386,9 @@ async def _check_account(
     def near(t: _Txn) -> bool:
         return (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
 
-    def redate(row: _Row, name: str, t: _Txn, hint: str) -> dict:
+    def redate(row: _Row, name: str, t: _Txn, hint: str, conf: int) -> dict:
         effect = Decimal(0) if ps <= row.date <= pe else -t.amount
-        issue = _issue("edge", "date", row, t, effect, hint, suggested=True)
+        issue = _issue("edge", "date", row, t, effect, hint, suggested=True, confidence=conf)
         issue["row"]["statement"] = name
         return issue
 
@@ -406,6 +412,8 @@ async def _check_account(
         )
         filed = next((s for s in away_rows if s.amount == t.amount and _gap(s, t) <= MATCH_DAYS), None)
         hint = f"Same amount as {twin.description} on {twin.date.isoformat()}, which the statement lists" if twin else None
+        twin_days = abs((twin.date - t.date).days) if twin else None
+        twin_similar = bool(twin) and _sim(twin.description, twin.merchant, t.description, t.merchant) >= SIMILAR
         near_edge = near(t)
         # Rows of neighbouring statements with this amount: one nothing accounts for is probably this transaction.
         nearby = sorted(
@@ -416,29 +424,35 @@ async def _check_account(
         if t.id in others:
             name, row = others[t.id]
             if row and row.date != t.date:
-                issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}"))
+                issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}", 95))
             else:
                 issues.append(_issue("edge", None, None, t, Decimal(0), f"Listed on {name}"))
         elif nearby and not nearby[0][0]:
             *_, row, name = nearby[0]
             used.add(row.id)
-            issues.append(redate(row, name, t, f"{name} lists it on {row.date.isoformat()}; nothing else accounts for it"))
-        elif nearby and not (twin and abs((twin.date - t.date).days) <= 1):
+            hint = f"{name} lists it on {row.date.isoformat()}; nothing else accounts for it"
+            issues.append(redate(row, name, t, hint, 90))
+        elif nearby and not (twin and twin_days <= 1):
             *_, row, name = nearby[0]
             hint = f"{name} lists {_money(row.amount)} on {row.date.isoformat()} as another transaction; likely a duplicate"
-            issues.append(_issue("edge", "remove", None, t, -t.amount, hint))
+            issues.append(_issue("edge", "remove", None, t, -t.amount, hint, confidence=60))
         # A copy the statement lists within a day means a duplicate, not a transaction from the next statement.
-        elif near_edge and not (twin and abs((twin.date - t.date).days) <= 1):
-            issues.append(_issue("edge", "remove", None, t, -t.amount, hint or "Close to the statement's start or end"))
+        elif near_edge and not (twin and twin_days <= 1):
+            hint = hint or "Close to the statement's start or end"
+            issues.append(_issue("edge", "remove", None, t, -t.amount, hint, confidence=20))
         elif filed:
             # The statement's row was matched to a copy in another account; either copy could be the wrong one.
             hint = (
                 f"Statement row {filed.index + 1} ({filed.description}) is recorded in "
                 f"{cross_names.get(away[filed.id])}; one of the two copies is probably misfiled"
             )
-            issues.append(_issue("extra", "remove", None, t, -t.amount, hint, suggested=False))
+            issues.append(_issue("extra", "remove", None, t, -t.amount, hint, suggested=False, confidence=30))
         else:
-            issues.append(_issue("extra", "remove", None, t, -t.amount, hint))
+            if twin and twin_days <= 1:
+                conf = 95 if twin_similar else 88
+            else:
+                conf = 85 if twin and twin_similar else 75
+            issues.append(_issue("extra", "remove", None, t, -t.amount, hint, confidence=conf))
 
     # Loan and some savings statements print amounts with the opposite sign to the ledger.
     missing = [i for i in issues if i["kind"] == "missing"]
@@ -467,6 +481,14 @@ async def _check_account(
     for i in issues:
         if i["suggested"] is None:
             i["suggested"] = i["kind"] in ACTIONABLE and trusted is not False and not reversed_signs
+    # Without the statement's own balances to vouch for its rows, a person should look first.
+    cap = 99 if trusted else 85 if trusted is None else 0
+    if reversed_signs:
+        cap = 0
+    elif result["detail"].get("message"):
+        cap = min(cap, 50)
+    for i in issues:
+        i["confidence"] = min(i["confidence"], cap)
 
     stmt_total = sum((s.amount for s in S), Decimal(0))
     in_period = [t for t in L.values() if ps <= t.date <= pe]
@@ -592,13 +614,31 @@ def _store(batch: ImportBatch, c: dict) -> dict:
     return {**c, "import_batch_id": batch.id, "account_ref": c["account_ref"][:100], "checked_at": datetime.now(UTC)}
 
 
-async def save_checks(session: AsyncSession, batch: ImportBatch) -> list[dict]:
-    """Recompute and persist the batch's coverage checks; returns them."""
-    checks = await check_batch(session, batch)
+async def save_checks(session: AsyncSession, batch: ImportBatch, checks: list[dict] | None = None) -> list[dict]:
+    """Persist the batch's coverage checks (recomputed unless given); returns them."""
+    if checks is None:
+        checks = await check_batch(session, batch)
     await session.execute(delete(StatementCheck).where(StatementCheck.import_batch_id == batch.id))
     if checks:
         await session.execute(insert(StatementCheck).values([_store(batch, c) for c in checks]))
     return checks
+
+
+async def auto_fix(session: AsyncSession, batch: ImportBatch) -> dict:
+    """Check the batch, apply the suggested fixes confident enough to need no review, and store the result."""
+    checks = await check_batch(session, batch)
+    picks = [
+        {"fix": i["fix"], "row_id": i["row_id"], "transaction_id": i["transaction_id"]}
+        for c in checks
+        for i in c["detail"]["issues"]
+        if i["fix"] and i["suggested"] and i["confidence"] >= AUTO_CONFIDENCE
+    ]
+    if not picks:
+        return {"applied": 0, "skipped": 0, "new_ids": [], "checks": await save_checks(session, batch, checks)}
+    result = await apply_fixes(session, batch, picks, auto=True)
+    if result["applied"]:
+        batch.stats = {**batch.stats, "auto_fixed": batch.stats.get("auto_fixed", 0) + result["applied"]}
+    return result
 
 
 def gate_message(checks: list[dict], labels: dict[str, str] | None = None) -> str | None:
@@ -616,7 +656,7 @@ def gate_message(checks: list[dict], labels: dict[str, str] | None = None) -> st
 
 
 # ---------- applying fixes ----------
-async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dict]) -> dict:
+async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dict], auto: bool = False) -> dict:
     """Apply fixes chosen from the batch's current check results; stale or unknown ones are skipped."""
     from ledger.imports.service import transaction_factory
     from ledger.services.categorize import apply_rules
@@ -626,6 +666,7 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
         (i["fix"], i["row_id"], i["transaction_id"]): (c, i) for c in current for i in c["detail"]["issues"] if i["fix"]
     }
     filename = batch.attachment.filename if batch.attachment else f"import #{batch.id}"
+    tag = " (applied automatically)" if auto else ""
     now = datetime.now(UTC)
     make = None
     applied = skipped = 0
@@ -661,9 +702,9 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
                 update(Transaction).where(Transaction.transfer_match_id == txn.id).values(transfer_match_id=None)
             )
             txn.transfer_match_id = None
-            _note(session, batch, txn.id, f"Removed: not listed on the statement {filename}")
+            _note(session, batch, txn.id, f"Removed: not listed on the statement {filename}{tag}")
         elif issue["fix"] == "amount":
-            body = f"Amount corrected from {_money(txn.amount)} to {_money(row.amount)} per {filename}"
+            body = f"Amount corrected from {_money(txn.amount)} to {_money(row.amount)} per {filename}{tag}"
             _note(session, batch, txn.id, body)
             txn.amount = row.amount
             txn.fingerprint = fingerprint(txn.account_id, txn.txn_date, txn.amount, txn.description)
@@ -673,7 +714,7 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
         elif issue["fix"] == "date":
             other = await session.get(ImportBatch, row.batch_id)
             name = other.attachment.filename if other.attachment else f"import #{other.id}"
-            body = f"Date corrected from {txn.txn_date.isoformat()} to {row.txn_date.isoformat()} per {name}"
+            body = f"Date corrected from {txn.txn_date.isoformat()} to {row.txn_date.isoformat()} per {name}{tag}"
             _note(session, other, txn.id, body)
             txn.txn_date = row.txn_date
             txn.fingerprint = fingerprint(txn.account_id, txn.txn_date, txn.amount, txn.description)
@@ -741,8 +782,8 @@ async def _link_row(session: AsyncSession, batch: ImportBatch, row: ImportRow, t
 
 
 # ---------- listing / bulk ----------
-async def check_all(session: AsyncSession, progress=None) -> dict:
-    """Re-run the check for every committed statement document."""
+async def check_all(session: AsyncSession, progress=None, apply: bool = False) -> dict:
+    """Re-run the check for every committed statement document; `apply` also applies the confident fixes."""
     ids = (
         await session.scalars(
             select(ImportBatch.id)
@@ -751,19 +792,30 @@ async def check_all(session: AsyncSession, progress=None) -> dict:
         )
     ).all()
     counts: Counter = Counter()
+    new_ids: list[int] = []
     for n, bid in enumerate(ids, 1):
         batch = await session.get(ImportBatch, bid)
         try:
-            for c in await save_checks(session, batch):
+            if apply:
+                r = await auto_fix(session, batch)
+                checks = r["checks"]
+            else:
+                checks = await save_checks(session, batch)
+            for c in checks:
                 counts[c["status"]] += 1
             await session.commit()
+            if apply:
+                counts["fixed"] += r["applied"]
+                new_ids += r["new_ids"]
         except Exception:
             log.exception("Statement check failed for batch %s", bid)
             await session.rollback()
             counts["failed"] += 1
         if progress and (n % 10 == 0 or n == len(ids)):
-            await progress(n / len(ids), f"Checked {n} of {len(ids)} statements")
-    return {"statements": len(ids), **counts}
+            verb = "Checked and fixed" if apply else "Checked"
+            fixed = f" · {counts['fixed']} fixes applied" if apply else ""
+            await progress(n / len(ids), f"{verb} {n} of {len(ids)} statements{fixed}")
+    return {"statements": len(ids), **counts, "new_ids": new_ids}
 
 
 async def account_names(session: AsyncSession, ids: list[int]) -> dict[int, str]:

@@ -1,13 +1,13 @@
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ledger.config import get_settings
 from ledger.db.engine import get_session
 from ledger.db.filters import id_in
-from ledger.imports.coverage import ACTIONABLE, account_names, apply_fixes, save_checks
+from ledger.imports.coverage import ACTIONABLE, AUTO_CONFIDENCE, account_names, apply_fixes, save_checks
 from ledger.imports.service import (
     ImportError_,
     commit_batch,
@@ -385,6 +385,10 @@ async def fix_batch_checks(batch_id: int, body: CheckFixIn, session: AsyncSessio
 CHECK_JOB = "statement_checks"
 
 
+def _confident(i: dict) -> bool:
+    return bool(i["fix"] and i["suggested"] and i.get("confidence", 0) >= AUTO_CONFIDENCE)
+
+
 @router.get("/statement-checks")
 async def list_statement_checks(
     status: str | None = None, account_id: int | None = None, session: AsyncSession = Depends(get_session)
@@ -435,6 +439,7 @@ async def list_statement_checks(
                 "trusted": c.trusted,
                 "issue_counts": kinds,
                 "fixes": sum(1 for i in issues if i["kind"] in ACTIONABLE or i["fix"] == "date"),
+                "confident": sum(1 for i in issues if _confident(i)),
                 "message": c.detail.get("message"),
                 "checked_at": c.checked_at,
             }
@@ -454,21 +459,37 @@ async def list_statement_checks(
         .join(ImportBatch, ImportBatch.id == StatementCheck.import_batch_id)
         .where(ImportBatch.status == "committed")
     )
+    confident = await session.scalar(
+        text(
+            """--sql
+            SELECT count(*)
+            FROM statement_check c
+            JOIN import_batch b ON b.id = c.import_batch_id AND b.status = 'committed'
+            CROSS JOIN LATERAL jsonb_array_elements(c.detail -> 'issues') i
+            WHERE i ->> 'fix' IS NOT NULL AND (i ->> 'suggested')::boolean
+              AND coalesce((i ->> 'confidence')::int, 0) >= :min
+            """
+        ),
+        {"min": AUTO_CONFIDENCE},
+    )
     return {
         "summary": summary,
         "statements": statements,
         "unchecked": unchecked,
+        "confident": confident,
+        "auto_confidence": AUTO_CONFIDENCE,
         "job": JobOut.model_validate(job) if job else None,
         "items": items,
     }
 
 
 @router.post("/statement-checks/run", response_model=JobOut, status_code=202)
-async def run_statement_checks(session: AsyncSession = Depends(get_session)):
+async def run_statement_checks(apply: bool = False, session: AsyncSession = Depends(get_session)):
+    """Re-check every committed statement; `apply` also applies the fixes confident enough to need no review."""
     busy = await session.scalar(select(Job.id).where(Job.type == CHECK_JOB, Job.status.in_(["queued", "running"])))
     if busy:
         raise HTTPException(409, "Statement checks are already running")
-    job = await enqueue(session, CHECK_JOB, {})
+    job = await enqueue(session, CHECK_JOB, {"apply": apply})
     await session.commit()
     notify_worker()
     await session.refresh(job)

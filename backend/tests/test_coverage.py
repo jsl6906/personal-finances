@@ -137,7 +137,7 @@ async def test_review_proposes_fixes_that_trust_the_statement(client, monkeypatc
     assert r["applied"] == 1 and r["checks"][0]["status"] == "ok" and r["checks"][0]["difference"] == "0.00"
 
 
-async def test_historic_check_and_post_commit_add(client, monkeypatch):
+async def test_confident_fixes_apply_at_commit_and_in_bulk(client, monkeypatch):
     acct = (await client.post("/api/accounts", json={"name": "Coverage Checking", "mask": "6603"})).json()["id"]
     await _txn(client, acct, "2021-06-03", "CORNER DELI", "-8.80")
     rows = [
@@ -146,24 +146,26 @@ async def test_historic_check_and_post_commit_add(client, monkeypatch):
         ("2021-06-15", "RENT PAYMENT", -1500.00),
     ]
     bid = await _statement(client, monkeypatch, "cov_jun.pdf", "6603", ("2021-06-01", "2021-06-30"), 1517.60, rows)
+    # The ledger had one deli charge for two statement rows; the missing one is added at commit without review.
     d = (await client.post(f"/api/imports/{bid}/commit", json={})).json()
-    assert d["stats"]["inserted"] == 1
-
-    result = await _run("statement_checks", {})
-    assert result["statements"] >= 1 and result["mismatch"] >= 1
-    listing = (await client.get("/api/statement-checks", params={"status": "mismatch"})).json()
-    item = next(i for i in listing["items"] if i["import_batch_id"] == bid)
-    assert item["issue_counts"] == {"missing": 1} and item["fixes"] == 1 and item["account_name"] == "Coverage Checking"
-    assert listing["unchecked"] == 0
-
-    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
-    [issue] = c["detail"]["issues"]
-    r = (
-        await client.post(f"/api/imports/{bid}/checks/fix", json={"fixes": [{"fix": "add", "row_id": issue["row_id"]}]})
-    ).json()
-    assert r["applied"] == 1 and r["checks"][0]["status"] == "ok"
+    assert d["stats"]["inserted"] == 1 and d["stats"]["auto_fixed"] == 1
     page = (await client.get("/api/transactions", params={"import_batch_id": bid})).json()
     assert sorted(t["description"] for t in page["items"]) == ["CORNER DELI", "CORNER DELI", "RENT PAYMENT"]
+
+    # A feed later records the rent twice; the copy is a confident removal.
+    copy = await _txn(client, acct, "2021-06-15", "RENT PAYMENT", "-1500.00")
+    result = await _run("statement_checks", {})
+    assert result["statements"] >= 1 and result["mismatch"] >= 1 and "fixed" not in result
+    listing = (await client.get("/api/statement-checks", params={"status": "mismatch"})).json()
+    item = next(i for i in listing["items"] if i["import_batch_id"] == bid)
+    assert item["issue_counts"] == {"extra": 1} and item["confident"] == 1 and item["account_name"] == "Coverage Checking"
+    assert listing["unchecked"] == 0 and listing["confident"] >= 1
+
+    result = await _run("statement_checks", {"apply": True})
+    assert result["fixed"] >= 1
+    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
+    assert c["status"] == "ok"
+    assert (await client.get(f"/api/transactions/{copy}")).status_code == 404
 
     # Rolling the statement back removes its check from the list.
     await client.post(f"/api/imports/{bid}/rollback")

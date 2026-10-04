@@ -215,7 +215,7 @@ export interface CheckIssue {
   row_id: number | null; transaction_id: number | null
   row: { row_id: number; row_index: number; date: string; description: string; amount: string; statement?: string } | null
   txn: { id: number; date: string; description: string; amount: string; source_type: string } | null
-  effect: string; hint: string | null; suggested: boolean
+  effect: string; hint: string | null; suggested: boolean; confidence?: number
 }
 export interface StatementCheck {
   import_batch_id: number; account_ref: string; account_id: number | null; account_name: string | null
@@ -228,10 +228,11 @@ export interface StatementCheck {
   }
 }
 export interface StatementCheckItem extends Omit<StatementCheck, 'detail'> {
-  issue_counts: Record<string, number>; fixes: number; message: string | null; checked_at: string
+  issue_counts: Record<string, number>; fixes: number; confident: number; message: string | null; checked_at: string
 }
 export interface StatementCheckList {
   summary: Partial<Record<CheckStatus, number>>; statements: number; unchecked: number; job: Job | null; items: StatementCheckItem[]
+  confident: number; auto_confidence: number
 }
 
 export interface TxnPair {
