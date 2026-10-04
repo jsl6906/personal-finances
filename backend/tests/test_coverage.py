@@ -169,3 +169,18 @@ async def test_historic_check_and_post_commit_add(client, monkeypatch):
     await client.post(f"/api/imports/{bid}/rollback")
     listing = (await client.get("/api/statement-checks")).json()
     assert all(i["import_batch_id"] != bid for i in listing["items"])
+
+
+async def test_duplicate_at_period_edge_is_not_explained_away(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Savings", "mask": "6604"})).json()["id"]
+    first = await _txn(client, acct, "2021-08-31", "INTEREST PAID", "2.95")
+    second = await _txn(client, acct, "2021-08-31", "INTEREST PAID", "2.95")
+    lone = await _txn(client, acct, "2021-08-01", "EDGE ONLY", "-1.11")
+    rows = [("2021-08-31", "INTEREST PAID", 2.95)]
+    bid = await _statement(client, monkeypatch, "cov_aug.pdf", "6604", ("2021-08-01", "2021-08-31"), 2.95, rows)
+
+    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
+    kinds = {i["kind"]: i for i in c["detail"]["issues"]}
+    assert set(kinds) == {"extra", "edge"} and c["status"] == "mismatch"
+    assert kinds["extra"]["transaction_id"] in (first, second) and kinds["extra"]["suggested"]
+    assert kinds["edge"]["transaction_id"] == lone and not kinds["edge"]["suggested"]

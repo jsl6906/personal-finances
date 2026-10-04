@@ -386,9 +386,11 @@ async def _check_account(
         )
         filed = next((s for s in away_rows if s.amount == t.amount and _gap(s, t) <= MATCH_DAYS), None)
         hint = f"Same amount as {twin.description} on {twin.date.isoformat()}, which the statement lists" if twin else None
+        # A copy the statement lists within a day means a duplicate, not a transaction from the next statement.
+        near_edge = (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
         if t.id in others:
             issues.append(_issue("edge", "remove", None, t, -t.amount, f"Listed on {others[t.id]}"))
-        elif (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS:
+        elif near_edge and not (twin and abs((twin.date - t.date).days) <= 1):
             issues.append(_issue("edge", "remove", None, t, -t.amount, hint or "Close to the statement's start or end"))
         elif filed:
             # The statement's row was matched to a copy in another account; either copy could be the wrong one.
