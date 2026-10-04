@@ -243,6 +243,8 @@ export function StatementChecksPanel() {
           <div className="small text-muted" style={{ maxWidth: '70ch' }}>
             For each statement, the ledger’s transactions for that account over the statement period are totalled and
             compared with the statement’s rows. When they differ, the statement is trusted and fixes are proposed.
+            {list.data?.statements ? ` ${list.data.statements} statements · ${total} account checks (combined statements`
+              + ' get one per account).' : ''}
             {last?.finished_at ? ` Last full check ${fullDate(last.finished_at)}.` : ''}
             {list.data?.unchecked ? ` ${list.data.unchecked} statements haven’t been checked yet.` : ''}
           </div>
@@ -263,7 +265,7 @@ export function StatementChecksPanel() {
           { value: 'explained', label: `Explained (${s.explained ?? 0})` },
           { value: 'ok', label: `Matches (${s.ok ?? 0})` },
           { value: 'unverified', label: `Not checked (${s.unverified ?? 0})` },
-          { value: 'all', label: `All (${total})` },
+          { value: 'all', label: `All accounts (${total})` },
         ]} />
       <div style={{ maxHeight: 560, overflow: 'auto' }}>
         <table className="table" style={{ fontSize: 13 }}>

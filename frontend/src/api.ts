@@ -231,7 +231,7 @@ export interface StatementCheckItem extends Omit<StatementCheck, 'detail'> {
   issue_counts: Record<string, number>; fixes: number; message: string | null; checked_at: string
 }
 export interface StatementCheckList {
-  summary: Partial<Record<CheckStatus, number>>; unchecked: number; job: Job | null; items: StatementCheckItem[]
+  summary: Partial<Record<CheckStatus, number>>; statements: number; unchecked: number; job: Job | null; items: StatementCheckItem[]
 }
 
 export interface TxnPair {

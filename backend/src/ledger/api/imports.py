@@ -449,8 +449,14 @@ async def list_statement_checks(
             ~select(StatementCheck.id).where(StatementCheck.import_batch_id == ImportBatch.id).exists(),
         )
     )
+    statements = await session.scalar(
+        select(func.count(func.distinct(StatementCheck.import_batch_id)))
+        .join(ImportBatch, ImportBatch.id == StatementCheck.import_batch_id)
+        .where(ImportBatch.status == "committed")
+    )
     return {
         "summary": summary,
+        "statements": statements,
         "unchecked": unchecked,
         "job": JobOut.model_validate(job) if job else None,
         "items": items,
