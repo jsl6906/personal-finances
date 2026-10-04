@@ -65,7 +65,8 @@ async def test_budget_status_with_spreading(client, cats):
     g_row = rows["TB Group · everything else"]
     assert g_row["budget"] == 400 and g_row["allocated"] == 100 and g_row["total_budget"] == 500
     assert g_row["actual"] == 450  # 550 group spend minus insurance's 100
-    assert rows["TB Insurance"]["actual"] == 100
+    assert g_row["category_names"] == ["TB Groceries"]
+    assert rows["TB Insurance"]["actual"] == 100 and rows["TB Insurance"]["category_names"] == []
 
     # Overall budget: net of the group budget (which already contains the insurance budget)
     ob = (await client.post("/api/budgets", json={"amount": "1000"})).json()

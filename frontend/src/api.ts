@@ -411,7 +411,7 @@ export interface Budget {
 }
 export interface BudgetRow {
   budget_id: number; category_id: number | null; group_id: number | null; scope: 'category' | 'group' | 'overall'
-  name: string; group: string | null; category_ids: number[]
+  name: string; group: string | null; category_ids: number[]; category_names: string[]
   kind: string; period_type: PeriodType; base_amount: number; total_budget: number; allocated: number; budget: number
   actual: number; left: number
   pct: number; projected: number; spread_amount: number; notes: string | null; status: 'ok' | 'pace' | 'over'

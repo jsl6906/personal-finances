@@ -140,6 +140,8 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
         net = sum((act.get(c, (Decimal(0), Decimal(0)))[0] for c in members), Decimal(0))
         spread = sum((act.get(c, (Decimal(0), Decimal(0)))[1] for c in members), Decimal(0))
         actual = -net if kind != "income" else net
+        sign = -1 if kind != "income" else 1
+        by_cat = sorted(((sign * act[c][0], cats[c].name) for c in members if c in act), reverse=True)
         total_budget = in_period(b)
         allocated = sum((in_period(x) for x in sub), Decimal(0))
         budget = total_budget - allocated
@@ -155,6 +157,7 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
                 "name": name,
                 "group": group,
                 "category_ids": members,
+                "category_names": [n for v, n in by_cat if v > 0] if scope != "category" else [],
                 "kind": kind,
                 "period_type": b.period_type,
                 "base_amount": b.amount,

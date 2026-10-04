@@ -99,7 +99,7 @@ export function Budgets() {
           }>
             <table className="table budget-table">
               <thead>
-                <tr><th>Category</th><th style={{ width: '32%' }}>Progress</th><th style={{ textAlign: 'right' }}>Spent</th>
+                <tr><th>Category</th><th style={{ width: '22%' }}>Progress</th><th style={{ textAlign: 'right' }}>Spent</th>
                   <th style={{ textAlign: 'right' }}>Budget</th><th style={{ textAlign: 'right' }}>Left</th><th /></tr>
               </thead>
               <tbody>
@@ -126,6 +126,12 @@ export function Budgets() {
                           {tag && <span className={`tag ${tag[0]}`}>{tag[1]} · {Math.round(r.pct)}%</span>}
                         </div>
                         {note && <div className="small muted-2">{note}</div>}
+                        {r.category_names.length > 0 && (
+                          <div className="small muted-2" title={r.category_names.length > 3 ? r.category_names.join(', ') : undefined}>
+                            Spending in {r.category_names.slice(0, 3).join(', ')}
+                            {r.category_names.length > 3 && ` and ${r.category_names.length - 3} more`}
+                          </div>
+                        )}
                       </td>
                       <td className="b-bar"><BudgetBar pct={r.pct} elapsed={elapsed} status={r.status} /></td>
                       <td className="num b-spent" data-label="Spent">{money(r.actual)}</td>
