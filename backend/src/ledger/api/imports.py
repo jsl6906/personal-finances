@@ -434,7 +434,7 @@ async def list_statement_checks(
                 "status": c.status,
                 "trusted": c.trusted,
                 "issue_counts": kinds,
-                "fixes": sum(1 for i in issues if i["kind"] in ACTIONABLE),
+                "fixes": sum(1 for i in issues if i["kind"] in ACTIONABLE or i["fix"] == "date"),
                 "message": c.detail.get("message"),
                 "checked_at": c.checked_at,
             }

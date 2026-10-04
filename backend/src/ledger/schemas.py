@@ -370,7 +370,7 @@ class CommitIn(BaseModel):
 
 
 class CheckFix(BaseModel):
-    fix: Literal["add", "remove", "amount", "link"]
+    fix: Literal["add", "remove", "amount", "link", "date"]
     row_id: int | None = None
     transaction_id: int | None = None
 

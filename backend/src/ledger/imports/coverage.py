@@ -5,7 +5,8 @@ Equal totals mean the ledger is complete for the period. Otherwise statement row
 transactions and every unexplained difference becomes a proposed fix that trusts the statement:
   missing -> add the row         extra -> remove the ledger transaction
   amount  -> correct the amount  link  -> (before commit) don't insert a row the ledger already has
-Ledger rows near a period edge or on another statement are listed as explained rather than proposed for removal.
+Ledger rows near a period edge or on another statement are listed as explained rather than proposed for removal;
+when another statement dates one differently (or has a row for it nothing accounts for), the fix is that date.
 """
 
 import logging
@@ -15,7 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from difflib import SequenceMatcher
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -375,6 +376,25 @@ async def _check_account(
 
     free = [t for t in L.values() if t.id not in claimed and ps <= t.date <= pe]
     away_rows = [s for s in S if s.id in away]
+
+    def near(t: _Txn) -> bool:
+        return (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
+
+    def redate(row: _Row, name: str, t: _Txn, hint: str) -> dict:
+        effect = Decimal(0) if ps <= row.date <= pe else -t.amount
+        issue = _issue("edge", "date", row, t, effect, hint, suggested=True)
+        issue["row"]["statement"] = name
+        return issue
+
+    elsewhere = await _rows_elsewhere(
+        session,
+        batch.id,
+        account_id,
+        {t.amount for t in free if t.id not in others and near(t)},
+        ps - timedelta(days=WINDOW_DAYS),
+        pe + timedelta(days=WINDOW_DAYS),
+    )
+    used: set[int] = set()
     for t in sorted(free, key=lambda t: (t.date, t.id)):
         twin = next(
             (
@@ -386,10 +406,28 @@ async def _check_account(
         )
         filed = next((s for s in away_rows if s.amount == t.amount and _gap(s, t) <= MATCH_DAYS), None)
         hint = f"Same amount as {twin.description} on {twin.date.isoformat()}, which the statement lists" if twin else None
-        # A copy the statement lists within a day means a duplicate, not a transaction from the next statement.
-        near_edge = (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
+        near_edge = near(t)
+        # Rows of neighbouring statements with this amount: one nothing accounts for is probably this transaction.
+        nearby = sorted(
+            (holder is not None, _gap(r, t), -_sim(r.description, r.merchant, t.description, t.merchant), r.id, r, name)
+            for r, name, holder in (elsewhere if near_edge and t.id not in others else [])
+            if r.amount == t.amount and _gap(r, t) <= MATCH_DAYS and r.id not in used and holder != t.id
+        )
         if t.id in others:
-            issues.append(_issue("edge", "remove", None, t, -t.amount, f"Listed on {others[t.id]}"))
+            name, row = others[t.id]
+            if row and row.date != t.date:
+                issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}"))
+            else:
+                issues.append(_issue("edge", None, None, t, Decimal(0), f"Listed on {name}"))
+        elif nearby and not nearby[0][0]:
+            *_, row, name = nearby[0]
+            used.add(row.id)
+            issues.append(redate(row, name, t, f"{name} lists it on {row.date.isoformat()}; nothing else accounts for it"))
+        elif nearby and not (twin and abs((twin.date - t.date).days) <= 1):
+            *_, row, name = nearby[0]
+            hint = f"{name} lists {_money(row.amount)} on {row.date.isoformat()} as another transaction; likely a duplicate"
+            issues.append(_issue("edge", "remove", None, t, -t.amount, hint))
+        # A copy the statement lists within a day means a duplicate, not a transaction from the next statement.
         elif near_edge and not (twin and abs((twin.date - t.date).days) <= 1):
             issues.append(_issue("edge", "remove", None, t, -t.amount, hint or "Close to the statement's start or end"))
         elif filed:
@@ -447,23 +485,107 @@ async def _check_account(
     return result
 
 
-async def _on_other_statements(session: AsyncSession, batch_id: int, txn_ids: list[int]) -> dict[int, str]:
-    """Ledger transactions created by or matched to rows of other statement documents -> that document's name."""
+_ROW_COLS = (
+    ImportRow.id,
+    ImportRow.row_index,
+    ImportRow.txn_date,
+    ImportRow.posted_date,
+    ImportRow.description,
+    ImportRow.merchant,
+    ImportRow.amount,
+    ImportRow.decision,
+)
+
+
+def _other_row(r) -> _Row:
+    return _Row(
+        r.id, r.row_index, r.txn_date, r.posted_date, r.description or "", r.merchant, r.amount, r.decision, False, None
+    )
+
+
+async def _on_other_statements(
+    session: AsyncSession, batch_id: int, txn_ids: list[int]
+) -> dict[int, tuple[str, _Row | None]]:
+    """Ledger transactions created by or matched to rows of other statement documents -> (that document's name, its
+    row when those statements agree on one date)."""
     if not txn_ids:
         return {}
     q = (
-        select(TransactionSource.transaction_id, func.min(Attachment.filename))
+        select(TransactionSource.transaction_id, Attachment.filename, *_ROW_COLS)
         .join(ImportBatch, ImportBatch.id == TransactionSource.import_batch_id)
         .join(Attachment, Attachment.id == ImportBatch.attachment_id)
+        .outerjoin(ImportRow, ImportRow.id == TransactionSource.import_row_id)
         .where(
             id_in(TransactionSource.transaction_id, txn_ids),
             TransactionSource.import_batch_id != batch_id,
             ImportBatch.source_type == "document",
             ImportBatch.status == "committed",
         )
-        .group_by(TransactionSource.transaction_id)
+        .order_by(Attachment.filename, ImportRow.id)
     )
-    return dict((await session.execute(q)).all())
+    found = defaultdict(list)
+    for r in (await session.execute(q)).all():
+        found[r.transaction_id].append(r)
+    out = {}
+    for tid, hits in found.items():
+        dated = [r for r in hits if r.id and r.txn_date and r.amount is not None]
+        one = len({r.txn_date for r in dated}) == 1 and len(dated) == len(hits)
+        out[tid] = (hits[0].filename, _other_row(dated[0]) if one else None)
+    return out
+
+
+async def _rows_elsewhere(
+    session: AsyncSession, batch_id: int, account_id: int, amounts: set[Decimal], lo: date, hi: date
+) -> list[tuple[_Row, str, int | None]]:
+    """Rows of other statements for this account with one of these amounts -> (row, document name, the live ledger
+    transaction that accounts for it or None)."""
+    if not amounts:
+        return []
+    found = (
+        await session.execute(
+            select(*_ROW_COLS, ImportRow.account_id, ImportRow.transaction_id, Attachment.filename)
+            .join(ImportBatch, ImportBatch.id == ImportRow.batch_id)
+            .join(Attachment, Attachment.id == ImportBatch.attachment_id)
+            .where(
+                ImportRow.batch_id != batch_id,
+                ImportBatch.source_type == "document",
+                ImportBatch.status == "committed",
+                ImportRow.decision != "invalid",
+                ImportRow.amount.in_(list(amounts)),
+                ImportRow.txn_date.between(lo, hi),
+            )
+        )
+    ).all()
+    if not found:
+        return []
+    held: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for row_id, txn_id, acct in (
+        await session.execute(
+            select(TransactionSource.import_row_id, Transaction.id, Transaction.account_id)
+            .join(Transaction, Transaction.id == TransactionSource.transaction_id)
+            .where(id_in(TransactionSource.import_row_id, [r.id for r in found]), Transaction.deleted_at.is_(None))
+        )
+    ).all():
+        held[row_id].append((txn_id, acct))
+    direct = [r.transaction_id for r in found if r.transaction_id]
+    live = dict(
+        (
+            await session.execute(
+                select(Transaction.id, Transaction.account_id).where(
+                    id_in(Transaction.id, direct), Transaction.deleted_at.is_(None)
+                )
+            )
+        ).all()
+    )
+    out = []
+    for r in found:
+        h = held[r.id] + ([(r.transaction_id, live[r.transaction_id])] if r.transaction_id in live else [])
+        mine = next((tid for tid, acct in h if acct == account_id), None)
+        # Rows recorded in another account, or read into another account and never linked, belong elsewhere.
+        if mine is None and (h or r.account_id != account_id):
+            continue
+        out.append((_other_row(r), r.filename, mine))
+    return out
 
 
 def _store(batch: ImportBatch, c: dict) -> dict:
@@ -508,6 +630,7 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
     make = None
     applied = skipped = 0
     new_ids: list[int] = []
+    touched: set[int] = set()
     for f in fixes:
         hit = offered.pop((f["fix"], f.get("row_id"), f.get("transaction_id")), None)
         if hit is None:
@@ -547,10 +670,21 @@ async def apply_fixes(session: AsyncSession, batch: ImportBatch, fixes: list[dic
             await _link_row(session, batch, row, txn.id, now)
         elif issue["fix"] == "link":
             await _link_row(session, batch, row, txn.id, now)
+        elif issue["fix"] == "date":
+            other = await session.get(ImportBatch, row.batch_id)
+            name = other.attachment.filename if other.attachment else f"import #{other.id}"
+            body = f"Date corrected from {txn.txn_date.isoformat()} to {row.txn_date.isoformat()} per {name}"
+            _note(session, other, txn.id, body)
+            txn.txn_date = row.txn_date
+            txn.fingerprint = fingerprint(txn.account_id, txn.txn_date, txn.amount, txn.description)
+            await _add_source(session, other, row, txn.id, "matched")
+            touched.add(other.id)
         applied += 1
     await session.flush()
     if new_ids:
         await apply_rules(session, new_ids)
+    for other_id in touched - {batch.id}:
+        await save_checks(session, await session.get(ImportBatch, other_id))
     checks = await save_checks(session, batch)
     return {"applied": applied, "skipped": skipped, "new_ids": new_ids, "checks": checks}
 
@@ -565,6 +699,10 @@ def _note(session: AsyncSession, batch: ImportBatch, txn_id: int, body: str) -> 
 
 async def _relink(session: AsyncSession, batch: ImportBatch, row: ImportRow, txn_id: int, role: str) -> None:
     await session.execute(delete(TransactionSource).where(TransactionSource.import_row_id == row.id))
+    await _add_source(session, batch, row, txn_id, role)
+
+
+async def _add_source(session: AsyncSession, batch: ImportBatch, row: ImportRow, txn_id: int, role: str) -> None:
     await session.execute(
         insert(TransactionSource)
         .values(

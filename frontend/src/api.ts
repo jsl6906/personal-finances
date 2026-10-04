@@ -209,11 +209,11 @@ export interface ImportPair {
 
 // ---- statement checks (statement rows vs ledger over the statement period) ----
 export type CheckStatus = 'ok' | 'explained' | 'mismatch' | 'unverified'
-export type CheckFixKind = 'add' | 'remove' | 'amount' | 'link'
+export type CheckFixKind = 'add' | 'remove' | 'amount' | 'link' | 'date'
 export interface CheckIssue {
   kind: 'missing' | 'extra' | 'amount' | 'link' | 'edge' | 'elsewhere'; fix: CheckFixKind | null
   row_id: number | null; transaction_id: number | null
-  row: { row_id: number; row_index: number; date: string; description: string; amount: string } | null
+  row: { row_id: number; row_index: number; date: string; description: string; amount: string; statement?: string } | null
   txn: { id: number; date: string; description: string; amount: string; source_type: string } | null
   effect: string; hint: string | null; suggested: boolean
 }

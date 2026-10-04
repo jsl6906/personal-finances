@@ -184,3 +184,40 @@ async def test_duplicate_at_period_edge_is_not_explained_away(client, monkeypatc
     assert set(kinds) == {"extra", "edge"} and c["status"] == "mismatch"
     assert kinds["extra"]["transaction_id"] in (first, second) and kinds["extra"]["suggested"]
     assert kinds["edge"]["transaction_id"] == lone and not kinds["edge"]["suggested"]
+
+
+async def test_edge_transaction_on_another_statement_takes_its_date(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Rewards", "mask": "6605"})).json()["id"]
+    late = await _txn(client, acct, "2021-10-01", "LATE CAFE", "-7.77")
+    sep_rows = [
+        ("2021-09-29", "LATE CAFE", -7.77),
+        ("2021-09-30", "MIDNIGHT DINER", -8.88),
+        ("2021-09-15", "SEP GROCER", -20.00),
+    ]
+    sep = await _statement(client, monkeypatch, "cov_sep.pdf", "6605", ("2021-09-01", "2021-09-30"), -36.65, sep_rows)
+    await client.post(f"/api/imports/{sep}/commit", json={})
+    assert any(s["import_batch_id"] == sep for s in (await client.get(f"/api/transactions/{late}/sources")).json())
+    # The diner row's transaction is lost; a feed later records the purchase two days on.
+    page = (await client.get("/api/transactions", params={"import_batch_id": sep, "q": "MIDNIGHT DINER"})).json()
+    await client.delete(f"/api/transactions/{page['items'][0]['id']}")
+    diner = await _txn(client, acct, "2021-10-02", "MIDNIGHT DINER", "-8.88")
+
+    oct_rows = [("2021-10-15", "OCT RENT CO", -900.00)]
+    bid = await _statement(client, monkeypatch, "cov_oct.pdf", "6605", ("2021-10-01", "2021-10-31"), -900.00, oct_rows)
+    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
+    assert c["status"] == "explained" and c["difference"] == "16.65"
+    fixes = {i["transaction_id"]: i for i in c["detail"]["issues"]}
+    assert set(fixes) == {late, diner}
+    assert all(i["kind"] == "edge" and i["fix"] == "date" and i["suggested"] for i in fixes.values())
+    assert fixes[late]["row"]["date"] == "2021-09-29" and fixes[late]["row"]["statement"] == "cov_sep.pdf"
+    assert fixes[diner]["row"]["date"] == "2021-09-30" and fixes[diner]["effect"] == "8.88"
+
+    body = {"fixes": [{"fix": "date", "row_id": i["row_id"], "transaction_id": t} for t, i in fixes.items()]}
+    r = (await client.post(f"/api/imports/{bid}/checks/fix", json=body)).json()
+    assert r["applied"] == 2 and r["checks"][0]["status"] == "ok"
+    assert (await client.get(f"/api/transactions/{late}")).json()["txn_date"] == "2021-09-29"
+    notes = (await client.get(f"/api/transactions/{late}/notes")).json()
+    assert notes[0]["body"] == "Date corrected from 2021-10-01 to 2021-09-29 per cov_sep.pdf"
+    assert (await client.get(f"/api/transactions/{diner}")).json()["txn_date"] == "2021-09-30"
+    [sep_check] = (await client.get(f"/api/imports/{sep}/checks")).json()
+    assert sep_check["status"] == "ok"

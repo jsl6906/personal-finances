@@ -21,6 +21,7 @@ const KIND_LABEL: Record<CheckIssue['kind'], string> = {
 }
 const FIX_LABEL: Record<string, string> = {
   add: 'Add to ledger', remove: 'Remove from ledger', amount: 'Use statement amount', link: 'Link, don’t add',
+  date: 'Use that statement’s date',
 }
 
 export function CheckStatusTag({ status }: { status: CheckStatus }) {
@@ -112,7 +113,9 @@ function AccountCheck({ b, c, multi, onApplied }: {
       <div className="small">
         {c.status === 'ok' && 'The ledger holds exactly the statement’s transactions for this period.'}
         {c.status === 'explained' && 'Totals differ only by transactions near the period edges, listed on another'
-          + ' statement, or recorded in another account — nothing needs fixing.'}
+          + ' statement, or recorded in another account'
+          + (fixable.some((i) => i.fix === 'date') ? '; where another statement dates one differently, its date is offered as a fix.'
+            : ' — nothing needs fixing.')}
         {c.status === 'mismatch' && 'The ledger doesn’t match the statement. The statement is treated as the record:'
           + ' suggested fixes are pre-selected; review them and apply.'}
         {shifted > 0 && ` ${shifted} matched transaction${shifted === 1 ? ' is' : 's are'} dated just outside the period.`}
@@ -158,7 +161,8 @@ function AccountCheck({ b, c, multi, onApplied }: {
                         <>
                           <div>{i.row.description}</div>
                           <div className="small text-muted nowrap">
-                            Row {i.row.row_index + 1} · {shortDate(i.row.date)} · {money(i.row.amount)}
+                            Row {i.row.row_index + 1}{i.row.statement ? ` of ${i.row.statement}` : ''}
+                            {' · '}{shortDate(i.row.date)} · {money(i.row.amount)}
                           </div>
                         </>
                       ) : <span className="text-muted">—</span>}
@@ -184,7 +188,7 @@ function AccountCheck({ b, c, multi, onApplied }: {
             <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
               <span className="small text-muted">
                 Selected fixes change the ledger by {money(change, true)}; remaining difference {money(remaining)}.
-                {before ? ' Adds and links adjust this import’s rows;' : ''} removals and amount corrections change
+                {before ? ' Adds and links adjust this import’s rows;' : ''} removals, amount and date corrections change
                 existing transactions now and leave a note on them.
               </span>
               <Button variant="primary" disabled={!chosen.length || apply.isPending}
