@@ -5,6 +5,7 @@ import { get, put, type AccountDetail } from '../api'
 import { CashflowChart, Legend } from '../components/Charts'
 import { LineChart } from '../components/LineChart'
 import { Breakdown, Findings, Kpis, RangeSeg, RenameCard, TableCard, TxnList, YearTable } from '../components/Detail'
+import { AccountStatements } from '../components/StatementCheck'
 import { Button, Card, ErrorNote } from '../components/ui'
 import { breakdownPath, rangeLabel, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso, shortDate } from '../format'
@@ -123,6 +124,7 @@ function AccountView({ id }: { id: number }) {
       )}
 
       <YearTable rows={d.yearly} show={['received', 'spent', 'net']} />
+      <AccountStatements accountId={id} />
       <Findings params={{ account_id: id }} />
       <TxnList params={{ account_id: id, start: r.start }} month={r.month} onClearMonth={r.clearMonth} hide={['account']} />
     </section>
