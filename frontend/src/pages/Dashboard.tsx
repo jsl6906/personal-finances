@@ -80,6 +80,29 @@ export function Dashboard() {
         ))}
       </div>
 
+      <Card>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div>
+            <div className="card-kicker">Budget</div>
+            <div className="card-title">{bs?.period.label ?? ''} · {Math.round((bs?.period.elapsed ?? 0) * 100)}% through</div>
+          </div>
+          <Link to="/budgets" className="btn btn-ghost">All budgets</Link>
+        </div>
+        <div className="stack-3">
+          {(bs?.rows ?? []).filter((r) => r.kind === 'expense').slice(0, 6).map((r) => (
+            <div key={r.budget_id} className="budget-row">
+              <div>{r.category_id ? <Link to={categoryPath(r.category_id)}>{r.name}</Link>
+                : r.group_id ? <Link to={groupPath(r.group_id)}>{r.name}</Link> : r.name}</div>
+              <div className={`progress budget-bar ${r.status}`}><div style={{ width: `${Math.min(100, r.pct)}%` }} /></div>
+              <div className={`nowrap${r.status === 'over' ? ' text-over' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {moneyRound(r.actual)} / {moneyRound(r.budget)}
+              </div>
+            </div>
+          ))}
+          {bs && bs.rows.length === 0 && <div className="text-muted small">No budgets yet. <Link to="/budgets">Set some up</Link>.</div>}
+        </div>
+      </Card>
+
       <div className="grid-main-side">
         <Card>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -181,28 +204,6 @@ export function Dashboard() {
           </Link>
         </Card>
       </div>
-      <Card>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <div>
-            <div className="card-kicker">Budget</div>
-            <div className="card-title">{bs?.period.label ?? ''} · {Math.round((bs?.period.elapsed ?? 0) * 100)}% through</div>
-          </div>
-          <Link to="/budgets" className="btn btn-ghost">All budgets</Link>
-        </div>
-        <div className="stack-3">
-          {(bs?.rows ?? []).filter((r) => r.kind === 'expense').slice(0, 6).map((r) => (
-            <div key={r.budget_id} className="budget-row">
-              <div>{r.category_id ? <Link to={categoryPath(r.category_id)}>{r.name}</Link>
-                : r.group_id ? <Link to={groupPath(r.group_id)}>{r.name}</Link> : r.name}</div>
-              <div className={`progress budget-bar ${r.status}`}><div style={{ width: `${Math.min(100, r.pct)}%` }} /></div>
-              <div className={`nowrap${r.status === 'over' ? ' text-over' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {moneyRound(r.actual)} / {moneyRound(r.budget)}
-              </div>
-            </div>
-          ))}
-          {bs && bs.rows.length === 0 && <div className="text-muted small">No budgets yet. <Link to="/budgets">Set some up</Link>.</div>}
-        </div>
-      </Card>
     </section>
   )
 }
