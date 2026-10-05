@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { get, post, type Job, type TxnBrief, type TxnPair } from '../api'
-import { Button, Card, ErrorNote, ProgressBar, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from '../components/ui'
 import { money, shortDate } from '../format'
 import { useJob } from '../hooks'
 import { txnPath } from '../links'
 import { pairConfidence } from '../review'
+import { numParam, oneOf, sortRows, useKeyedState, useUrl, useUrlSort } from '../urlState'
 
 type Decision = 'keep_a' | 'keep_b' | 'separate'
 type Filter = 'likely' | 'unsure' | 'unlikely' | 'all' | 'kept'
+const FILTERS: Filter[] = ['likely', 'unsure', 'unlikely', 'all', 'kept']
 
 const likelihood = (p: TxnPair) => Number(p.ai_probability ?? p.score)
 const MATCHES: Record<Exclude<Filter, 'all' | 'kept'>, (p: TxnPair) => boolean> = {
@@ -32,16 +34,17 @@ function Side({ t, bold }: { t: TxnBrief; bold: boolean }) {
 
 export function Duplicates() {
   const qc = useQueryClient()
-  const [searchParams] = useSearchParams()
-  const [jobId, setJobId] = useState<number | null>(searchParams.get('job') ? Number(searchParams.get('job')) : null)
+  const [params, set] = useUrl()
+  const [jobId, setJobId] = useState<number | null>(numParam(params, 'job'))
   const job = useJob(jobId)
   const pairs = useQuery({ queryKey: ['duplicates', 'pending'], queryFn: () => get<TxnPair[]>('/duplicates', { limit: 1000 }) })
   const kept = useQuery({
     queryKey: ['duplicates', 'separate'],
     queryFn: () => get<TxnPair[]>('/duplicates', { status: 'confirmed_separate', limit: 1000 }),
   })
-  const [checked, setChecked] = useState<Set<number>>(new Set())
-  const [filter, setFilter] = useState<Filter | null>(null)
+  const filter: Filter | null = params.get('view') ? oneOf(params, 'view', FILTERS, 'all') : null
+  const setFilter = (v: Filter) => set({ view: v })
+  const sort = useUrlSort({ date: 'desc', match: 'desc' })
   const scan = useMutation({ mutationFn: () => post<Job>('/duplicates/scan', {}), onSuccess: (j) => setJobId(j.id) })
   const decide = useMutation({
     mutationFn: ({ ids, decision }: { ids: number[]; decision: Decision }) =>
@@ -62,8 +65,11 @@ export function Duplicates() {
   const counts = { likely: 0, unsure: 0, unlikely: 0 }
   for (const p of list) for (const k of Object.keys(MATCHES) as (keyof typeof MATCHES)[]) if (MATCHES[k](p)) counts[k]++
   const active: Filter = filter ?? (counts.likely ? 'likely' : 'all')
+  const [checked, setChecked] = useKeyedState(active, () => new Set<number>())
   const showKept = active === 'kept'
-  const shown = showKept ? kept.data ?? [] : active === 'all' ? list : list.filter(MATCHES[active])
+  const shown = sortRows(showKept ? kept.data ?? [] : active === 'all' ? list : list.filter(MATCHES[active]), sort, {
+    date: (p) => p.a.txn_date, match: likelihood,
+  })
   const shownIds = showKept ? [] : shown.map((p) => p.id)
   const allChecked = shownIds.length > 0 && shownIds.every((id) => checked.has(id))
   const toggle = (id: number) => setChecked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -115,7 +121,7 @@ export function Duplicates() {
                 ? `, ${decide.data.skipped} skipped (a transaction in them was already merged away)` : ''}.`}
             </div>
             <span className="spacer" />
-            <Seg<Filter> name="dupfilter" value={active} onChange={(v) => { setFilter(v); setChecked(new Set()) }}
+            <Seg<Filter> name="dupfilter" value={active} onChange={setFilter}
               options={[
                 { value: 'likely', label: `Likely same (${counts.likely})` },
                 { value: 'unsure', label: `Unsure (${counts.unsure})` },
@@ -156,7 +162,8 @@ export function Duplicates() {
                         onChange={() => setChecked(allChecked ? new Set() : new Set(shownIds))} />
                     </th>
                   )}
-                  <th>Left</th><th>Right</th><th>Match</th>{!showKept && <th>Decide</th>}
+                  <SortTh s={sort} k="date" title="Sort by date">Left</SortTh><th>Right</th>
+                  <SortTh s={sort} k="match">Match</SortTh>{!showKept && <th>Decide</th>}
                 </tr>
               </thead>
               <tbody>

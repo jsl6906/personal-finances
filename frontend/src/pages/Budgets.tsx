@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { del, get, post, put, type Budget, type BudgetRow, type BudgetStatus, type BudgetSuggestion, type PeriodType, type SpreadRule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { TableCard } from '../components/Detail'
-import { Button, Card, ErrorNote, Field, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, Field, Seg, SortTh } from '../components/ui'
 import { iso, money, parseIso } from '../format'
 import { useGroups } from '../hooks'
 import { categoryPath, txnsPath } from '../links'
+import { oneOf, sortRows, useUrl, useUrlSort } from '../urlState'
 
 function shift(on: string, period: PeriodType, dir: number): string {
   const d = parseIso(on)
@@ -31,15 +32,13 @@ const STATUS_RANK: Record<BudgetRow['status'], number> = { over: 0, pace: 1, ok:
 
 export function Budgets() {
   const qc = useQueryClient()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const p = searchParams.get('period')
-  const period: PeriodType = p === 'quarter' || p === 'year' ? p : 'month'
+  const [searchParams, set] = useUrl()
+  const period = oneOf<PeriodType>(searchParams, 'period', ['month', 'quarter', 'year'], 'month')
   const [today] = useState(() => iso(new Date()))
   const on = searchParams.get('on') ?? today
-  // replace: stepping through periods shouldn't pile up history entries
-  const setView = (per: PeriodType, date: string) => setSearchParams({ period: per, on: date }, { replace: true })
-  const setPeriod = (per: PeriodType) => setView(per, on)
-  const setOn = (date: string) => setView(period, date)
+  const setPeriod = (per: PeriodType) => set({ period: per === 'month' ? null : per })
+  const setOn = (date: string) => set({ on: date === today ? null : date })
+  const sort = useUrlSort({ name: 'asc', pct: 'desc', spent: 'desc', budget: 'desc', left: 'asc' })
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const status = useQuery({
     queryKey: ['budgets', 'status', period, on],
@@ -52,8 +51,10 @@ export function Budgets() {
   const hasOverall = (budgets.data ?? []).some((b) => !b.category_id && !b.group_id)
 
   const elapsed = s?.period.elapsed ?? 0
-  const rows = [...(s?.rows ?? [])].sort((a, b) =>
-    Number(a.kind !== 'expense') - Number(b.kind !== 'expense') || STATUS_RANK[a.status] - STATUS_RANK[b.status])
+  const rows = sortRows([...(s?.rows ?? [])].sort((a, b) =>
+    Number(a.kind !== 'expense') - Number(b.kind !== 'expense') || STATUS_RANK[a.status] - STATUS_RANK[b.status]), sort, {
+    name: (r) => r.name, pct: (r) => r.pct, spent: (r) => r.actual, budget: (r) => r.budget, left: (r) => r.left,
+  })
   const expense = rows.filter((r) => r.kind === 'expense')
   const counts = { over: 0, pace: 0, ok: 0 }
   for (const r of expense) counts[r.status] += 1
@@ -106,8 +107,9 @@ export function Budgets() {
           }>
             <table className="table budget-table">
               <thead>
-                <tr><th>Category</th><th style={{ width: '22%' }}>Progress</th><th style={{ textAlign: 'right' }}>Spent</th>
-                  <th style={{ textAlign: 'right' }}>Budget</th><th style={{ textAlign: 'right' }}>Left</th><th /></tr>
+                <tr><SortTh s={sort} k="name">Category</SortTh><SortTh s={sort} k="pct" style={{ width: '22%' }}>Progress</SortTh>
+                  <SortTh s={sort} k="spent" right>Spent</SortTh><SortTh s={sort} k="budget" right>Budget</SortTh>
+                  <SortTh s={sort} k="left" right>Left</SortTh><th /></tr>
               </thead>
               <tbody>
                 {rows.map((r) => {

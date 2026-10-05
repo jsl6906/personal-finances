@@ -1,4 +1,5 @@
 import type { ReactNode, CSSProperties } from 'react'
+import type { Sort } from '../urlState'
 
 export function Corners() {
   return (
@@ -50,6 +51,21 @@ export function Seg<T extends string>({
         </label>
       ))}
     </div>
+  )
+}
+
+/** Clickable column header for a `useUrlSort` table. */
+export function SortTh<K extends string>({ s, k, children, right, className, style, title }: {
+  s: Sort<K>; k: NoInfer<K>; children: ReactNode; right?: boolean; className?: string; style?: CSSProperties; title?: string
+}) {
+  const active = s.key === k
+  return (
+    <th className={className} style={right ? { textAlign: 'right', ...style } : style}
+      aria-sort={active ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={`th-sort${active ? ' active' : ''}`} title={title} onClick={() => s.toggle(k)}>
+        {children}<span className="th-sort-arrow">{active ? (s.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
   )
 }
 

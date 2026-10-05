@@ -1,22 +1,26 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { del, get, put, type CategoryAlias, type CategoryRule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { CrudTable } from '../components/CrudTable'
 import { MerchantReview } from '../components/MerchantReview'
 import { RuleEditor } from '../components/RuleEditor'
-import { Button, Card, ErrorNote, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, Seg, SortTh } from '../components/ui'
 import { useCategories } from '../hooks'
 import { categoryPath } from '../links'
 import { ruleBody, ruleDraft, SOURCE_LABELS } from '../rules'
+import { numParam, oneOf, sortRows, useUrl, useUrlSort, useUrlText } from '../urlState'
 
 type Tab = 'rules' | 'aliases' | 'merchants'
+const TABS: Tab[] = ['rules', 'aliases', 'merchants']
 const SHOW = 200
 
 export function Rules() {
-  const [params, setParams] = useSearchParams()
-  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'merchants' ? 'merchants' : 'rules'))
+  const [params, set] = useUrl()
+  const tab = oneOf(params, 'tab', TABS, 'rules')
+  // Each tab has its own filters, so switching starts clean (Back returns to the previous tab as it was).
+  const setTab = (t: Tab) => set({ tab: t === 'rules' ? null : t }, { reset: true })
   return (
     <section className="page">
       <header className="page-header">
@@ -41,21 +45,26 @@ export function Rules() {
         { value: 'rules', label: 'Rules' }, { value: 'aliases', label: 'Import label mappings' },
         { value: 'merchants', label: 'Merchant cleanup' },
       ]} />
-      {tab === 'rules' ? <RuleList params={params} setParams={setParams} /> : tab === 'aliases' ? <AliasTable /> : <MerchantReview />}
+      {tab === 'rules' ? <RuleList /> : tab === 'aliases' ? <AliasTable /> : <MerchantReview />}
     </section>
   )
 }
 
-function RuleList({ params, setParams }: { params: URLSearchParams; setParams: ReturnType<typeof useSearchParams>[1] }) {
+const RULE_SORT = { priority: 'asc', when: 'asc', category: 'asc', source: 'asc', applied: 'desc', active: 'desc' } as const
+
+function RuleList() {
   const qc = useQueryClient()
+  const [params, set] = useUrl()
   const rules = useQuery({ queryKey: ['rules'], queryFn: () => get<CategoryRule[]>('/rules') })
-  const [q, setQ] = useState('')
-  const [source, setSource] = useState('')
-  const [categoryId, setCategoryId] = useState<number | null>(() => (params.get('category') ? Number(params.get('category')) : null))
-  const [showAll, setShowAll] = useState(false)
+  const [q, setQ] = useUrlText('q')
+  const source = params.get('source') ?? ''
+  const categoryId = numParam(params, 'category')
+  const showAll = params.get('all') === '1'
+  const sort = useUrlSort(RULE_SORT)
   const [message, setMessage] = useState<string | null>(null)
   const editParam = params.get('id')
-  const [editing, setEditing] = useState<number | 'new' | null>(() => (editParam ? Number(editParam) : null))
+  const editing: number | 'new' | null = editParam === 'new' ? 'new' : numParam(params, 'id')
+  const setEditing = (v: number | 'new' | null) => set({ id: v })
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['rules'] })
   const toggle = useMutation({
@@ -74,13 +83,16 @@ function RuleList({ params, setParams }: { params: URLSearchParams; setParams: R
       (!needle || [r.pattern, r.description, r.category_name, r.category_group_name, r.account_name ?? '', r.note ?? '']
         .some((s) => s.toLowerCase().includes(needle))))
   }, [rules.data, q, source, categoryId])
-  const shown = showAll ? filtered : filtered.slice(0, SHOW)
+  const sorted = sortRows(filtered, sort, {
+    priority: (r) => r.priority, when: (r) => r.description, category: (r) => r.category_name,
+    source: (r) => SOURCE_LABELS[r.source] ?? r.source, applied: (r) => r.applied_count, active: (r) => Number(r.is_active),
+  })
+  const shown = showAll ? sorted : sorted.slice(0, SHOW)
   const current = typeof editing === 'number' ? rules.data?.find((r) => r.id === editing) : undefined
 
   const close = (msg?: string) => {
     setEditing(null)
     if (msg) setMessage(msg)
-    if (params.get('id')) setParams({})
   }
 
   return (
@@ -109,11 +121,11 @@ function RuleList({ params, setParams }: { params: URLSearchParams; setParams: R
 
       <div className="row-3">
         <input className="input compact" placeholder="Search rules…" style={{ width: 220 }} value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="input compact" value={source} onChange={(e) => setSource(e.target.value)}>
+        <select className="input compact" value={source} onChange={(e) => set({ source: e.target.value })}>
           <option value="">Any source</option>
           {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <CategorySelect className="input compact" value={categoryId} onChange={setCategoryId} emptyLabel="All categories" />
+        <CategorySelect className="input compact" value={categoryId} onChange={(v) => set({ category: v })} emptyLabel="All categories" />
         <span className="spacer" />
         <Button variant="primary" onClick={() => { setMessage(null); setEditing('new') }} disabled={editing === 'new'}>New rule</Button>
       </div>
@@ -123,8 +135,9 @@ function RuleList({ params, setParams }: { params: URLSearchParams; setParams: R
         <table className="table">
           <thead>
             <tr>
-              <th className="num" style={{ width: 60 }}>Priority</th><th>When</th><th>Category</th><th className="hide-sm">Source</th>
-              <th className="num">Applied</th><th>Active</th><th />
+              <SortTh s={sort} k="priority" right style={{ width: 60 }}>Priority</SortTh><SortTh s={sort} k="when">When</SortTh>
+              <SortTh s={sort} k="category">Category</SortTh><SortTh s={sort} k="source" className="hide-sm">Source</SortTh>
+              <SortTh s={sort} k="applied" right>Applied</SortTh><SortTh s={sort} k="active">Active</SortTh><th />
             </tr>
           </thead>
           <tbody>
@@ -160,7 +173,7 @@ function RuleList({ params, setParams }: { params: URLSearchParams; setParams: R
         {filtered.length > shown.length && (
           <div className="table-foot">
             <span className="text-muted">Showing {shown.length} of {filtered.length.toLocaleString()}</span>
-            <Button variant="ghost" onClick={() => setShowAll(true)}>Show all</Button>
+            <Button variant="ghost" onClick={() => set({ all: true })}>Show all</Button>
           </div>
         )}
       </Card>

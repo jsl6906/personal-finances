@@ -5,10 +5,12 @@ import { get, post, type Job, type MerchantReviewState, type MerchantSuggestion,
 import { shortDate } from '../format'
 import { useJob } from '../hooks'
 import { merchantPath } from '../links'
+import { oneOf, useKeyedState, useUrl, useUrlText } from '../urlState'
 import { Button, Card, ErrorNote, ProgressBar, Seg } from './ui'
 
 type View = 'merge' | 'rename' | 'minor'
 type Sort = 'txns' | 'merchants'
+const VIEWS: View[] = ['merge', 'rename', 'minor']
 type Edit = { name?: string; target?: string; skip?: string[] }
 type Work = { verb: 'Applying' | 'Dismissing'; done: number; total: number; ids: Set<number> }
 const PAGE = 100
@@ -39,12 +41,13 @@ export function MerchantReview() {
   const shownJob: Job | null = job.data ?? latest
   const running = !!shownJob && ACTIVE.includes(shownJob.status)
   const [all, setAll] = useState(false)
-  const [view, setView] = useState<View>('merge')
-  const [sort, setSort] = useState<Sort>('txns')
-  const [q, setQ] = useState('')
-  const [limit, setLimit] = useState(PAGE)
+  const [params, set] = useUrl()
+  const view = oneOf(params, 'view', VIEWS, 'merge')
+  const sort = oneOf<Sort>(params, 'order', ['txns', 'merchants'], 'txns')
+  const [q, setQ, committedQ] = useUrlText('q')
+  const [limit, setLimit] = useKeyedState(`${view}|${sort}|${committedQ}`, () => PAGE)
   const [edits, setEdits] = useState<Record<number, Edit>>({})
-  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [checked, setChecked] = useKeyedState(view, () => new Set<number>())
   const [message, setMessage] = useState<string | null>(null)
   const [work, setWork] = useState<Work | null>(null)
   const [workError, setWorkError] = useState<unknown>(null)
@@ -192,15 +195,15 @@ export function MerchantReview() {
       <ErrorNote error={review.error || run.error || workError} />
 
       <div className="row-3">
-        <Seg name="review-view" value={view} onChange={(v) => { setView(v); setLimit(PAGE); setChecked(new Set()) }} options={[
+        <Seg name="review-view" value={view} onChange={(v) => set({ view: v === 'merge' ? null : v })} options={[
           { value: 'merge', label: `Merges (${counts.merge})` },
           { value: 'rename', label: `Renames (${counts.rename})` },
           { value: 'minor', label: `Capitalization only (${counts.minor})` },
         ]} />
         <input className="input compact" placeholder="Search suggestions…" style={{ width: 220 }} value={q}
-          onChange={(e) => { setQ(e.target.value); setLimit(PAGE) }} />
+          onChange={(e) => setQ(e.target.value)} />
         {view === 'merge' && (
-          <Seg name="review-sort" value={sort} onChange={(v) => { setSort(v); setLimit(PAGE) }} options={[
+          <Seg name="review-sort" value={sort} onChange={(v) => set({ order: v === 'txns' ? null : v })} options={[
             { value: 'txns', label: 'Most transactions' },
             { value: 'merchants', label: 'Most merchants' },
           ]} />

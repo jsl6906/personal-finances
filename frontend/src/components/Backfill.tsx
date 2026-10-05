@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { get, post, put, type BackfillFileRow, type BackfillOverview } from '../api'
+import { useUrl } from '../urlState'
 import { Button, Card, ErrorNote, ProgressBar, Seg } from './ui'
 
 const KIND_LABEL: Record<string, string> = {
@@ -34,7 +35,9 @@ const KINDS = ['bank_statement', 'credit_card_statement', 'loan_statement', 'uti
 
 export function BackfillCard() {
   const qc = useQueryClient()
-  const [flaggedOnly, setFlaggedOnly] = useState(false)
+  const [params, set] = useUrl()
+  const flaggedOnly = params.get('flagged') === '1'
+  const setFlaggedOnly = (v: boolean) => set({ flagged: v })
   const ov = useQuery({
     queryKey: ['backfill'],
     queryFn: () => get<BackfillOverview>('/backfill'),

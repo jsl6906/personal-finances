@@ -6,10 +6,11 @@ import { CashflowChart, Legend } from '../components/Charts'
 import { LineChart } from '../components/LineChart'
 import { Breakdown, Findings, Kpis, RangeSeg, RenameCard, TableCard, TxnList, YearTable } from '../components/Detail'
 import { AccountStatements } from '../components/StatementCheck'
-import { Button, Card, ErrorNote } from '../components/ui'
+import { Button, Card, ErrorNote, SortTh } from '../components/ui'
 import { breakdownPath, rangeLabel, useDetailRange } from '../detail'
 import { fullDate, money, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { merchantPath } from '../links'
+import { sortRows, useUrlSort } from '../urlState'
 
 export function AccountPage() {
   const id = Number(useParams().id)
@@ -18,6 +19,7 @@ export function AccountPage() {
 
 function AccountView({ id }: { id: number }) {
   const r = useDetailRange('12m')
+  const hs = useUrlSort({ symbol: 'asc', description: 'asc', shares: 'desc', value: 'desc', gain: 'desc' }, null, 'hsort')
   const q = useQuery({
     queryKey: ['details', 'account', id, r.start],
     queryFn: () => get<AccountDetail>(`/accounts/${id}/detail`, { start: r.start }),
@@ -107,10 +109,14 @@ function AccountView({ id }: { id: number }) {
       {d.holdings.length > 0 && (
         <TableCard head={<div className="card-kicker" style={{ padding: 'var(--space-3) var(--space-3) 0' }}>Holdings · as of {fullDate(d.holdings[0].as_of)}</div>}>
           <table className="table">
-            <thead><tr><th>Symbol</th><th>Description</th><th style={{ textAlign: 'right' }}>Shares</th>
-              <th style={{ textAlign: 'right' }}>Value</th><th style={{ textAlign: 'right' }}>Gain</th></tr></thead>
+            <thead><tr><SortTh s={hs} k="symbol">Symbol</SortTh><SortTh s={hs} k="description">Description</SortTh>
+              <SortTh s={hs} k="shares" right>Shares</SortTh><SortTh s={hs} k="value" right>Value</SortTh>
+              <SortTh s={hs} k="gain" right>Gain</SortTh></tr></thead>
             <tbody>
-              {d.holdings.map((h, i) => (
+              {sortRows(d.holdings, hs, {
+                symbol: (h) => h.symbol, description: (h) => h.description, shares: (h) => h.shares, value: (h) => h.market_value,
+                gain: (h) => (h.market_value !== null && h.cost_basis !== null ? h.market_value - h.cost_basis : null),
+              }).map((h, i) => (
                 <tr key={`${h.symbol}-${i}`}>
                   <td>{h.symbol ?? '—'}</td><td className="text-muted">{h.description ?? ''}</td>
                   <td className="num">{h.shares?.toLocaleString() ?? '—'}</td>

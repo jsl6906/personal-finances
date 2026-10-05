@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -7,11 +7,12 @@ import {
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { StatementChecks } from '../components/StatementCheck'
-import { Button, Card, ErrorNote, Field, ProgressBar, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, Field, ProgressBar, Seg, SortTh } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { txnPath } from '../links'
 import { useAccounts, useJob, useMembers, useTags } from '../hooks'
 import { ORIGINS, STATUS_TAG, pairConfidence } from '../review'
+import { numParam, oneOf, sortRows, useKeyedState, useUrl, useUrlSort } from '../urlState'
 import { Steps } from './Import'
 
 const DATE_FORMATS = [
@@ -83,8 +84,16 @@ function Wizard({ b }: { b: BatchDetail }) {
   const pending = b.decisions.pending ?? 0
   const defaultStep = b.status === 'review' ? (noAccount ? 3 : pending ? 4 : 5) : ['committed', 'rolled_back'].includes(b.status) ? 5
     : b.status === 'preparing' ? 3 : 2
-  const [step, setStep] = useState(defaultStep)
   const reachable = b.status === 'review' ? 5 : ['committed', 'rolled_back'].includes(b.status) ? 5 : 3
+  const [params, set] = useUrl()
+  const urlStep = numParam(params, 'step')
+  const step = urlStep !== null && urlStep >= 1 && urlStep <= reachable ? urlStep : defaultStep
+  // Each step is a history entry; other step-specific params (filters, sorts) don't carry over.
+  const setStep = (n: number) => set({ step: n }, { reset: true })
+  // Pin the opening step so it doesn't jump when decisions change the computed default.
+  useEffect(() => {
+    if (urlStep === null) set({ step: defaultStep }, { replace: true })
+  }, [urlStep, defaultStep, set])
   const locked = ['committed', 'rolled_back'].includes(b.status)
 
   const refresh = () => {
@@ -474,12 +483,18 @@ function SourceStep({ b }: { b: BatchDetail }) {
 
 function DocRows({ b }: { b: BatchDetail }) {
   const rows = useQuery({ queryKey: ['import', b.id, 'rows', 'all'], queryFn: () => get<ImportRow[]>(`/imports/${b.id}/rows`, { limit: 1000 }) })
+  const sort = useUrlSort({ date: 'asc', description: 'asc', account: 'asc', amount: 'desc', conf: 'asc' }, null, 'rsort')
   const stmtAccounts = b.doc_meta?.accounts ?? []
   const multi = stmtAccounts.length > 1
   const label = (ref: string | undefined) => {
     const sa = stmtAccounts.find((a) => a.ref === ref)
     return sa ? stmtLabel(sa) : ref || '—'
   }
+  const conf = (r: ImportRow) => Number(r.raw.Confidence ?? 1)
+  const sorted = sortRows(rows.data ?? [], sort, {
+    date: (r) => r.txn_date ?? r.raw.Date, description: (r) => r.raw.Description, account: (r) => label(r.raw.Account),
+    amount: (r) => (r.raw.Amount ? Number(r.raw.Amount) : null), conf,
+  })
   return (
     <Card style={{ gap: 'var(--space-3)' }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -487,16 +502,18 @@ function DocRows({ b }: { b: BatchDetail }) {
         <span className="tag tag-accent">{b.row_count} rows extracted</span>
       </div>
       <table className="table" style={{ fontSize: 13 }}>
-        <thead><tr><th>Date</th><th>Posted</th><th>Description</th>{multi && <th>Account</th>}<th style={{ textAlign: 'right' }}>Amount</th><th>Conf.</th></tr></thead>
+        <thead><tr><SortTh s={sort} k="date">Date</SortTh><th>Posted</th><SortTh s={sort} k="description">Description</SortTh>
+          {multi && <SortTh s={sort} k="account">Account</SortTh>}<SortTh s={sort} k="amount" right>Amount</SortTh>
+          <SortTh s={sort} k="conf">Conf.</SortTh></tr></thead>
         <tbody>
-          {(rows.data ?? []).map((r) => {
-            const conf = Number(r.raw.Confidence ?? 1)
+          {sorted.map((r) => {
+            const c = conf(r)
             return (
-              <tr key={r.id} className={conf < 0.8 ? 'low-conf' : ''}>
+              <tr key={r.id} className={c < 0.8 ? 'low-conf' : ''}>
                 <td className="nowrap">{r.raw.Date}</td><td className="nowrap text-muted">{r.raw.Posted}</td>
                 <td>{r.raw.Description}</td>{multi && <td className="nowrap text-muted">{label(r.raw.Account)}</td>}
                 <td className="num">{money(r.raw.Amount)}</td>
-                <td className="small">{Math.round(conf * 100)}%</td>
+                <td className="small">{Math.round(c * 100)}%</td>
               </tr>
             )
           })}
@@ -549,13 +566,16 @@ function DocMetaCard({ b }: { b: BatchDetail }) {
 }
 
 type Filter = 'all' | 'pending' | 'skip_duplicate' | 'keep'
+const FILTERS: Filter[] = ['all', 'pending', 'skip_duplicate', 'keep']
 const DECISION_LABEL: Record<string, string> = { pending: 'Undecided', skip_duplicate: 'Skip incoming', keep: 'Keep both' }
 
 function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void }) {
   const qc = useQueryClient()
   const pairs = useQuery({ queryKey: ['import', b.id, 'pairs'], queryFn: () => get<ImportPair[]>(`/imports/${b.id}/duplicates`) })
-  const [checked, setChecked] = useState<Set<number>>(new Set())
-  const [filter, setFilter] = useState<Filter | null>(null)
+  const [params, set] = useUrl()
+  const filter: Filter | null = params.get('dups') ? oneOf(params, 'dups', FILTERS, 'all') : null
+  const setFilter = (v: Filter) => set({ dups: v })
+  const sort = useUrlSort({ row: 'asc', amount: 'desc', match: 'desc' }, null, 'dsort')
   const decide = useMutation({
     mutationFn: ({ rowIds, decision }: { rowIds: number[]; decision: string }) =>
       post<BatchDetail>(`/imports/${b.id}/rows/decisions`, { row_ids: rowIds, decision }),
@@ -572,7 +592,11 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
   const skipped = list.filter((p) => p.row.decision === 'skip_duplicate').length
   const kept = list.filter((p) => p.row.decision === 'keep').length
   const active: Filter = filter ?? (open.length ? 'pending' : 'all')
-  const shown = active === 'all' ? list : list.filter((p) => p.row.decision === active)
+  const [checked, setChecked] = useKeyedState(active, () => new Set<number>())
+  const shown = sortRows(active === 'all' ? list : list.filter((p) => p.row.decision === active), sort, {
+    row: (p) => p.row.row_index, amount: (p) => (p.row.amount === null ? null : Math.abs(Number(p.row.amount))),
+    match: (p) => Number(p.ai_probability ?? p.score),
+  })
   const shownIds = shown.map((p) => p.row.id)
   const allChecked = shownIds.length > 0 && shownIds.every((id) => checked.has(id))
   const toggle = (id: number) => setChecked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -602,7 +626,7 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
           </div>
         </div>
         <span className="spacer" />
-        <Seg<Filter> name="dupfilter" value={active} onChange={(v) => { setFilter(v); setChecked(new Set()) }}
+        <Seg<Filter> name="dupfilter" value={active} onChange={setFilter}
           options={[
             { value: 'pending', label: `Undecided (${open.length})` }, { value: 'skip_duplicate', label: `Skip (${skipped})` },
             { value: 'keep', label: `Keep (${kept})` }, { value: 'all', label: `All (${list.length})` },
@@ -645,8 +669,8 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
                 <input type="checkbox" checked={allChecked}
                   onChange={() => setChecked(allChecked ? new Set() : new Set(shownIds))} />
               </th>
-              <th>Row</th><th>Incoming · {b.filename}</th><th style={{ textAlign: 'right' }}>Amount</th>
-              <th>Already in ledger</th><th>Match</th><th>Decision</th>
+              <SortTh s={sort} k="row">Row</SortTh><th>Incoming · {b.filename}</th><SortTh s={sort} k="amount" right>Amount</SortTh>
+              <th>Already in ledger</th><SortTh s={sort} k="match">Match</SortTh><th>Decision</th>
             </tr>
           </thead>
           <tbody>

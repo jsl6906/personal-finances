@@ -4,9 +4,10 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { del, get, post, upload, type Series, type SeriesPoint, type Statement, type Usage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { LineChart } from '../components/LineChart'
-import { Button, Card, ErrorNote, Field } from '../components/ui'
+import { Button, Card, ErrorNote, Field, SortTh } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { categoryPath, txnPath } from '../links'
+import { sortRows, useUrlSort } from '../urlState'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const periodLabel = (s: { period_start: string | null; period_end: string | null; statement_date?: string | null }) =>
@@ -213,7 +214,13 @@ function Suggestion({ st, series }: { st: Statement; series: Series[] }) {
 
 function SeriesView({ id, series }: { id: number; series?: Series }) {
   const hist = useQuery({ queryKey: ['series', id, 'history'], queryFn: () => get<SeriesPoint[]>(`/statement-series/${id}/history`) })
+  const sort = useUrlSort({ statement: 'asc', period: 'desc', usage: 'desc', cost: 'desc', paid: 'desc', amount: 'desc' })
   const pts = hist.data ?? []
+  const num = (v: string | null) => (v === null ? null : Number(v))
+  const table = sortRows([...pts].reverse(), sort, {
+    statement: (p) => p.filename, period: (p) => p.period_end ?? p.statement_date, usage: (p) => num(p.usage_value),
+    cost: (p) => num(p.cost_per_unit), paid: (p) => p.transactions[0]?.txn_date, amount: (p) => num(p.amount_due),
+  })
   const last12 = pts.slice(-12)
   const withUsage = last12.filter((p) => p.usage_value !== null)
   const avg = withUsage.length ? withUsage.reduce((a, p) => a + Number(p.usage_value), 0) / withUsage.length : null
@@ -244,10 +251,12 @@ function SeriesView({ id, series }: { id: number; series?: Series }) {
       <Card className="table-card">
         <table className="table">
           <thead>
-            <tr><th>Statement</th><th>Period</th><th>Usage</th><th>Cost / unit</th><th>Linked transaction</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
+            <tr><SortTh s={sort} k="statement">Statement</SortTh><SortTh s={sort} k="period">Period</SortTh>
+              <SortTh s={sort} k="usage">Usage</SortTh><SortTh s={sort} k="cost">Cost / unit</SortTh>
+              <SortTh s={sort} k="paid">Linked transaction</SortTh><SortTh s={sort} k="amount" right>Amount</SortTh></tr>
           </thead>
           <tbody>
-            {[...pts].reverse().map((p) => (
+            {table.map((p) => (
               <tr key={p.statement_id}>
                 <td style={{ fontWeight: 500 }}>
                   <a href={`/api/attachments/${p.attachment_id}/content`} target="_blank" rel="noreferrer">{p.filename}</a>

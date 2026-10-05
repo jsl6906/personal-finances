@@ -4,11 +4,12 @@ import { Link } from 'react-router-dom'
 import {
   del, get, post, put, type Anomaly, type BreakdownRow, type BudgetInfo, type EntityYear, type PeriodType, type TransactionPage,
 } from '../api'
-import type { DetailRange } from '../detail'
+import { TXN_SORT, type DetailRange } from '../detail'
 import { iso, money, monthLabel, parseIso, shortDate } from '../format'
 import { accountPath, categoryPath, txnPath } from '../links'
+import { numParam, sortRows, useUrl, useUrlSort } from '../urlState'
 import { AnomalyList } from './AnomalyList'
-import { Button, Card, ErrorNote, Field, Seg } from './ui'
+import { Button, Card, ErrorNote, Field, Seg, SortTh } from './ui'
 
 export function RangeSeg({ value, onChange }: { value: DetailRange; onChange: (r: DetailRange) => void }) {
   return (
@@ -139,17 +140,19 @@ export function TableCard({ children, head, foot }: { children: ReactNode; head?
 }
 
 export function YearTable({ rows, show }: { rows: EntityYear[]; show: ('spent' | 'received' | 'net')[] }) {
+  const s = useUrlSort({ year: 'desc', spent: 'desc', received: 'desc', net: 'desc', count: 'desc' }, null, 'ysort')
   if (rows.length === 0) return null
   const label = { spent: 'Out', received: 'In', net: 'Net' }
+  const sorted = sortRows(rows, s, { year: (r) => r.year, spent: (r) => r.spent, received: (r) => r.received, net: (r) => r.net, count: (r) => r.count })
   return (
     <TableCard>
       <table className="table">
         <thead>
-          <tr><th>Year</th>{show.map((k) => <th key={k} style={{ textAlign: 'right' }}>{label[k]}</th>)}
-            <th style={{ textAlign: 'right' }}>Transactions</th></tr>
+          <tr><SortTh s={s} k="year">Year</SortTh>{show.map((k) => <SortTh key={k} s={s} k={k} right>{label[k]}</SortTh>)}
+            <SortTh s={s} k="count" right>Transactions</SortTh></tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {sorted.map((r) => (
             <tr key={r.year}>
               <td>{r.year}</td>
               {show.map((k) => <td key={k} className="num">{money(r[k])}</td>)}
@@ -181,15 +184,15 @@ type TxnListProps = {
   hide?: ('category' | 'account')[]; highlightId?: number; title?: string
 }
 
-/** Paged transactions for a filter; rows link to the transaction page and to their category/account pages. */
-export function TxnList(props: TxnListProps) {
-  return <TxnTable key={JSON.stringify([props.params, props.month])} {...props} />
-}
-
-function TxnTable({ params, month, onClearMonth, hide = [], highlightId, title = 'Transactions' }: TxnListProps) {
-  const [offset, setOffset] = useState(0)
+/** Paged transactions for a filter; rows link to the transaction page and to their category/account pages. Sort and
+ * page live in the URL (`sort`, `page`). */
+export function TxnList({ params, month, onClearMonth, hide = [], highlightId, title = 'Transactions' }: TxnListProps) {
+  const [url, set] = useUrl()
+  const sort = useUrlSort(TXN_SORT, 'date_desc', 'sort', ['page'])
+  const page = Math.max(1, numParam(url, 'page') ?? 1)
+  const offset = (page - 1) * PAGE
   const range = month ? { start: month, end: iso(new Date(parseIso(month).getFullYear(), parseIso(month).getMonth() + 1, 0)) } : {}
-  const full = { ...params, ...range, limit: PAGE, offset }
+  const full = { ...params, ...range, limit: PAGE, offset, sort: `${sort.key}_${sort.dir}` }
   const list = useQuery({
     queryKey: ['transactions', 'for', full],
     queryFn: () => get<TransactionPage>('/transactions', full),
@@ -216,8 +219,8 @@ function TxnTable({ params, month, onClearMonth, hide = [], highlightId, title =
         <div className="table-foot">
           <span className="text-muted">{offset + 1}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()}</span>
           <div className="row">
-            <Button variant="ghost" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</Button>
-            <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
+            <Button variant="ghost" disabled={page === 1} onClick={() => set({ page: page > 2 ? page - 1 : null })}>Previous</Button>
+            <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => set({ page: page + 1 })}>Next</Button>
           </div>
         </div>
       )}
@@ -225,8 +228,9 @@ function TxnTable({ params, month, onClearMonth, hide = [], highlightId, title =
       <table className="table">
         <thead>
           <tr>
-            <th>Date</th><th>Description</th>{!hide.includes('category') && <th>Category</th>}
-            {!hide.includes('account') && <th>Account</th>}<th style={{ textAlign: 'right' }}>Amount</th>
+            <SortTh s={sort} k="date">Date</SortTh><SortTh s={sort} k="description">Description</SortTh>
+            {!hide.includes('category') && <SortTh s={sort} k="category">Category</SortTh>}
+            {!hide.includes('account') && <SortTh s={sort} k="account">Account</SortTh>}<SortTh s={sort} k="amount" right>Amount</SortTh>
           </tr>
         </thead>
         <tbody>

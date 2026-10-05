@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../api'
-import { Card, ErrorNote, Seg } from './ui'
+import { oneOf, sortRows, useUrl, useUrlSort } from '../urlState'
+import { Card, ErrorNote, Seg, SortTh } from './ui'
 
 interface Health {
   db: string; schema: string | null; schema_current: boolean; worker: boolean; ai_configured: boolean; smtp_configured: boolean
@@ -16,7 +16,10 @@ const ok = (good: boolean, yes = 'OK', no = 'Not configured') => (
 )
 
 export function SystemPanel() {
-  const [days, setDays] = useState<'7' | '30' | '90'>('30')
+  const [params, set] = useUrl()
+  const days = oneOf(params, 'days', ['7', '30', '90'] as const, '30')
+  const setDays = (d: typeof days) => set({ days: d === '30' ? null : d })
+  const sort = useUrlSort({ purpose: 'asc', model: 'asc', calls: 'desc', errors: 'desc', input: 'desc', output: 'desc', latency: 'desc' })
   const health = useQuery({ queryKey: ['health'], queryFn: () => get<Health>('/health') })
   const usage = useQuery({ queryKey: ['ai-usage', days], queryFn: () => get<AiUsage>('/ai-usage', { days }) })
   const h = health.data
@@ -66,11 +69,16 @@ export function SystemPanel() {
         <div style={{ overflowX: 'auto' }}>
           <table className="table">
             <thead>
-              <tr><th>Purpose</th><th>Model</th><th className="num">Calls</th><th className="num">Errors</th>
-                <th className="num">Input tokens</th><th className="num">Output tokens</th><th className="num">Avg latency</th></tr>
+              <tr><SortTh s={sort} k="purpose">Purpose</SortTh><SortTh s={sort} k="model">Model</SortTh>
+                <SortTh s={sort} k="calls" right>Calls</SortTh><SortTh s={sort} k="errors" right>Errors</SortTh>
+                <SortTh s={sort} k="input" right>Input tokens</SortTh><SortTh s={sort} k="output" right>Output tokens</SortTh>
+                <SortTh s={sort} k="latency" right>Avg latency</SortTh></tr>
             </thead>
             <tbody>
-              {(usage.data?.items ?? []).map((i) => (
+              {sortRows(usage.data?.items ?? [], sort, {
+                purpose: (i) => i.purpose, model: (i) => i.model, calls: (i) => i.calls, errors: (i) => i.errors,
+                input: (i) => i.input_tokens, output: (i) => i.output_tokens, latency: (i) => i.avg_latency_ms,
+              }).map((i) => (
                 <tr key={`${i.purpose}-${i.model}`}>
                   <td>{i.purpose.replace(/_/g, ' ')}</td>
                   <td className="text-muted">{i.model}</td>

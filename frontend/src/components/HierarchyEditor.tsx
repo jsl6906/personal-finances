@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { del, post, put } from '../api'
+import { useUrl, useUrlText } from '../urlState'
 import { Editor, type Column } from './CrudTable'
 import { TableCard } from './Detail'
 import { Button, ErrorNote, Field } from './ui'
@@ -52,8 +53,10 @@ export function HierarchyEditor({ parent, child, parentKey, parents, items, orph
   const [edit, setEdit] = useState<Edit | null>(null)
   const [draft, setDraft] = useState<Record<string, unknown>>({})
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
-  const [showDim, setShowDim] = useState(false)
-  const [filter, setFilter] = useState('')
+  const [params, set] = useUrl()
+  const showDim = params.get('all') === '1'
+  const setShowDim = (v: boolean) => set({ all: v })
+  const [filter, setFilter] = useUrlText('q')
 
   const childParentCol: Column = {
     key: parentKey, label: parent.label, kind: 'select', required: !orphanLabel,

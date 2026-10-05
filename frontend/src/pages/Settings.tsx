@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { ACCOUNT_TYPES } from '../api'
 import { CrudTable } from '../components/CrudTable'
@@ -7,15 +6,19 @@ import { SystemPanel } from '../components/SystemPanel'
 import { Seg } from '../components/ui'
 import { useAccounts, useCategories, useGroups, useInstitutions, useMembers, useTags } from '../hooks'
 import { accountPath, categoryPath, groupPath } from '../links'
+import { oneOf, useUrl } from '../urlState'
 
 type Tab = 'accounts' | 'categories' | 'members' | 'tags' | 'system'
+const TABS: Tab[] = ['accounts', 'categories', 'members', 'tags', 'system']
 type Row = { id: number } & Record<string, unknown>
 type Rows = UseQueryResult<Row[]>
 
 const TYPE_OPTIONS = ['expense', 'income', 'transfer'].map((t) => ({ value: t, label: t }))
 
 export function Settings() {
-  const [tab, setTab] = useState<Tab>('accounts')
+  const [params, set] = useUrl()
+  const tab = oneOf(params, 'tab', TABS, 'accounts')
+  const setTab = (t: Tab) => set({ tab: t === 'accounts' ? null : t }, { reset: true })
   const accounts = useAccounts()
   const institutions = useInstitutions()
   const categories = useCategories()

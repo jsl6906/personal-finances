@@ -7,10 +7,11 @@ import {
 } from '../api'
 import { BackfillCard } from '../components/Backfill'
 import { BalanceSparkline } from '../components/LineChart'
-import { Button, Card, ErrorNote } from '../components/ui'
+import { Button, Card, ErrorNote, SortTh } from '../components/ui'
 import { useAccounts, useBalanceTrend, useJob } from '../hooks'
 import { fullDate, money, shortDate } from '../format'
 import { accountPath } from '../links'
+import { sortRows, useUrlSort } from '../urlState'
 
 const LIABILITIES = ['credit_card', 'loan', 'mortgage']
 
@@ -210,20 +211,30 @@ function BalancesCard() {
   const q = useQuery({ queryKey: ['balances'], queryFn: () => get<Balances>('/balances') })
   const accounts = useAccounts()
   const trend = useBalanceTrend()
+  const sort = useUrlSort({ account: 'asc', institution: 'asc', balance: 'desc', change: 'desc', asof: 'desc', source: 'asc' }, null, 'bsort')
   const b = q.data
   if (!b || b.accounts.length === 0 || !accounts.data) return null
   const balanceBy = new Map(b.accounts.map((row) => [row.account_id, row]))
-  const accountGroups = new Map<string, { account: (typeof accounts.data)[number]; balance: (typeof b.accounts)[number]; signed: number }[]>()
+  const accountGroups = new Map<string, { account: (typeof accounts.data)[number]; balance: (typeof b.accounts)[number]; signed: number; change: number | null }[]>()
   for (const account of accounts.data) {
     const balance = balanceBy.get(account.id)
     if (account.is_closed || account.is_hidden || !balance || !Number(balance.balance)) continue
-    const signed = LIABILITIES.includes(account.account_type) ? -Math.abs(Number(balance.balance)) : Number(balance.balance)
+    const liability = LIABILITIES.includes(account.account_type)
+    const signed = liability ? -Math.abs(Number(balance.balance)) : Number(balance.balance)
+    const change = balance.balance_30d_ago === null ? null : signed - (liability ? -Math.abs(balance.balance_30d_ago) : balance.balance_30d_ago)
     const rows = accountGroups.get(account.account_type) ?? []
-    rows.push({ account, balance, signed })
+    rows.push({ account, balance, signed, change })
     accountGroups.set(account.account_type, rows)
   }
+  // Sorting applies within each account-type group; groups stay ordered by their totals.
   const groupedAccounts = [...accountGroups.entries()]
-    .map(([type, rows]) => ({ type, rows: rows.sort((a, b) => b.signed - a.signed), total: rows.reduce((sum, row) => sum + row.signed, 0) }))
+    .map(([type, rows]) => ({
+      type, total: rows.reduce((sum, row) => sum + row.signed, 0),
+      rows: sortRows(rows.sort((a, b) => b.signed - a.signed), sort, {
+        account: (r) => r.account.name, institution: (r) => r.account.institution_name ?? r.balance.institution,
+        balance: (r) => r.signed, change: (r) => r.change, asof: (r) => r.balance.as_of, source: (r) => r.balance.source,
+      }),
+    }))
     .sort((a, b) => b.total - a.total)
   return (
     <Card style={{ padding: 0, gap: 0 }}>
@@ -232,7 +243,10 @@ function BalancesCard() {
         <div className="small text-muted">Assets {money(b.assets)} · Liabilities {money(b.liabilities)}</div>
       </div>
       <div style={{ overflowX: 'auto' }}><table className="table">
-        <thead><tr><th>Account</th><th>Institution</th><th className="num">Balance</th><th className="hide-sm">Last 24 months</th><th className="num">30-day change</th><th>As of</th><th>Source</th></tr></thead>
+        <thead><tr><SortTh s={sort} k="account">Account</SortTh><SortTh s={sort} k="institution">Institution</SortTh>
+          <SortTh s={sort} k="balance" right>Balance</SortTh><th className="hide-sm">Last 24 months</th>
+          <SortTh s={sort} k="change" right>30-day change</SortTh><SortTh s={sort} k="asof">As of</SortTh>
+          <SortTh s={sort} k="source">Source</SortTh></tr></thead>
         {groupedAccounts.map(({ type, rows, total }) => (
           <tbody key={type}>
             <tr className="group-row">
@@ -243,24 +257,19 @@ function BalancesCard() {
               <td />
               <td />
             </tr>
-            {rows.map(({ account, balance, signed }) => {
-              const change = balance.balance_30d_ago === null
-                ? null
-                : signed - (LIABILITIES.includes(account.account_type) ? -Math.abs(balance.balance_30d_ago) : balance.balance_30d_ago)
-              return (
-                <tr key={account.id}>
-                  <td><Link to={accountPath(account.id)}>{account.name}{account.mask ? ` ···${account.mask}` : ''}</Link></td>
-                  <td className="text-muted">{account.institution_name ?? balance.institution ?? '—'}</td>
-                  <td className="num">{money(signed)}</td>
-                  <td className="hide-sm">
-                    <BalanceSparkline points={trend.data?.[account.id]} liability={LIABILITIES.includes(account.account_type)} />
-                  </td>
-                  <td className="num text-muted">{change === null ? '—' : money(change, true)}</td>
-                  <td className="nowrap text-muted">{fullDate(balance.as_of)}</td>
-                  <td className="text-muted">{balance.source}</td>
-                </tr>
-              )
-            })}
+            {rows.map(({ account, balance, signed, change }) => (
+              <tr key={account.id}>
+                <td><Link to={accountPath(account.id)}>{account.name}{account.mask ? ` ···${account.mask}` : ''}</Link></td>
+                <td className="text-muted">{account.institution_name ?? balance.institution ?? '—'}</td>
+                <td className="num">{money(signed)}</td>
+                <td className="hide-sm">
+                  <BalanceSparkline points={trend.data?.[account.id]} liability={LIABILITIES.includes(account.account_type)} />
+                </td>
+                <td className="num text-muted">{change === null ? '—' : money(change, true)}</td>
+                <td className="nowrap text-muted">{fullDate(balance.as_of)}</td>
+                <td className="text-muted">{balance.source}</td>
+              </tr>
+            ))}
           </tbody>
         ))}
         {groupedAccounts.length === 0 && (
@@ -273,17 +282,26 @@ function BalancesCard() {
 
 function HoldingsCard() {
   const q = useQuery({ queryKey: ['holdings'], queryFn: () => get<HoldingRow[]>('/holdings') })
+  const sort = useUrlSort({ account: 'asc', symbol: 'asc', description: 'asc', shares: 'desc', value: 'desc', gain: 'desc', asof: 'desc' }, null, 'hsort')
   if (!q.data?.length) return null
   const total = q.data.reduce((s, h) => s + (h.market_value ?? 0), 0)
+  const rows = sortRows(q.data, sort, {
+    account: (h) => h.account, symbol: (h) => h.symbol, description: (h) => h.description, shares: (h) => h.shares,
+    value: (h) => h.market_value, gain: (h) => (h.market_value !== null && h.cost_basis !== null ? h.market_value - h.cost_basis : null),
+    asof: (h) => h.as_of,
+  })
   return (
     <Card style={{ padding: 0, gap: 0 }}>
       <div style={{ padding: 'var(--space-3) var(--space-4) 0' }}>
         <div className="card-kicker">Investments</div><div className="card-title">Holdings · {money(total)}</div>
       </div>
       <div style={{ overflowX: 'auto' }}><table className="table">
-        <thead><tr><th>Account</th><th>Symbol</th><th>Description</th><th className="num">Shares</th><th className="num">Value</th><th className="num">Gain</th><th>As of</th></tr></thead>
+        <thead><tr><SortTh s={sort} k="account">Account</SortTh><SortTh s={sort} k="symbol">Symbol</SortTh>
+          <SortTh s={sort} k="description">Description</SortTh><SortTh s={sort} k="shares" right>Shares</SortTh>
+          <SortTh s={sort} k="value" right>Value</SortTh><SortTh s={sort} k="gain" right>Gain</SortTh>
+          <SortTh s={sort} k="asof">As of</SortTh></tr></thead>
         <tbody>
-          {q.data.map((h, i) => (
+          {rows.map((h, i) => (
             <tr key={i}>
               <td>{h.account}</td>
               <td>{h.symbol ?? '—'}</td>

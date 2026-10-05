@@ -2,10 +2,11 @@ import { useRef, useState, type DragEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { get, post, upload, type BatchDetail, type BatchSummary } from '../api'
-import { Button, Card, ErrorNote, Icon } from '../components/ui'
+import { Button, Card, ErrorNote, Icon, SortTh } from '../components/ui'
 import { StatementChecksPanel } from '../components/StatementCheck'
 import { fullDate } from '../format'
 import { STATUS_TAG, STEP_NAMES } from '../review'
+import { sortRows, useUrlSort } from '../urlState'
 
 const SHEET_ACCEPT = '.csv,.tsv,.txt,.xlsx,.xlsm,.xls'
 const DOC_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.heic,.gif,.tif,.tiff'
@@ -59,6 +60,7 @@ export function ImportHome() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const recent = useQuery({ queryKey: ['imports'], queryFn: () => get<BatchSummary[]>('/imports', { limit: 25 }) })
+  const sort = useUrlSort({ file: 'asc', type: 'asc', status: 'asc', rows: 'desc', inserted: 'desc', dups: 'desc', when: 'desc' })
   const send = useMutation({
     mutationFn: (f: File) => upload<BatchDetail>('/imports', f),
     onSuccess: (b) => {
@@ -92,10 +94,15 @@ export function ImportHome() {
         <div className="card-kicker">Recent imports</div>
         <table className="table">
           <thead>
-            <tr><th>File</th><th>Type</th><th>Status</th><th>Rows</th><th>Inserted</th><th>Duplicates removed</th><th>When</th><th /></tr>
+            <tr><SortTh s={sort} k="file">File</SortTh><SortTh s={sort} k="type">Type</SortTh><SortTh s={sort} k="status">Status</SortTh>
+              <SortTh s={sort} k="rows">Rows</SortTh><SortTh s={sort} k="inserted">Inserted</SortTh>
+              <SortTh s={sort} k="dups">Duplicates removed</SortTh><SortTh s={sort} k="when">When</SortTh><th /></tr>
           </thead>
           <tbody>
-            {(recent.data ?? []).map((b) => (
+            {sortRows(recent.data ?? [], sort, {
+              file: (b) => b.filename, type: (b) => b.source_type, status: (b) => b.status, rows: (b) => b.row_count,
+              inserted: (b) => b.stats.inserted, dups: (b) => b.stats.skipped_duplicates, when: (b) => b.created_at,
+            }).map((b) => (
               <tr key={b.id} className="clickable" onClick={() => navigate(`/import/${b.id}`)}>
                 <td>{b.filename}</td>
                 <td className="text-muted">{b.source_type}{b.origin !== 'upload' ? ` · ${b.origin}` : ''}</td>

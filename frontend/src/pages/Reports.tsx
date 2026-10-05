@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { get, type CashflowMonth, type CategoryRow, type Merchant, type Trend } from '../api'
 import { stackColor } from '../chartUtils'
 import { Legend, NET_DOWN, NET_UP, NetChart, SeriesHistory, StackedBars } from '../components/Charts'
-import { Button, Card, ErrorNote, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, Seg, SortTh } from '../components/ui'
 import { iso, money, moneyRound, monthEnd, parseIso, shortDate } from '../format'
 import { categoryPath, groupPath, merchantPath } from '../links'
 import { tipHandlers, useTip, type TipSpec } from '../tip'
+import { numParam, oneOf, sortRows, useUrl, useUrlSort } from '../urlState'
 
 type Range = '12m' | '24m' | 'ytd' | 'last_year' | 'all' | 'years'
+const RANGES: Range[] = ['12m', '24m', 'ytd', 'last_year', 'all', 'years']
+const LEVELS = ['group', 'category'] as const
+type Level = (typeof LEVELS)[number]
 
 function rangeDates(r: Range, firstYear: number, fromYear: number, toYear: number): { start: string; end: string } {
   const now = new Date()
@@ -29,22 +33,24 @@ function rangeDates(r: Range, firstYear: number, fromYear: number, toYear: numbe
 
 export function Reports() {
   const tip = useTip()
-  const [params, setParams] = useSearchParams()
-  const [range, setRange] = useState<Range>('12m')
-  const [histLevel, setHistLevel] = useState<'group' | 'category'>('group')
-  const [histKind, setHistKind] = useState<'expense' | 'income'>('expense')
-  const [histAll, setHistAll] = useState(false)
-  const [netMode, setNetMode] = useState<'waterfall' | 'monthly'>('waterfall')
-  const [incLevel, setIncLevel] = useState<'group' | 'category'>('category')
-  const [expLevel, setExpLevel] = useState<'group' | 'category'>('group')
+  const [params, set] = useUrl()
+  const range = oneOf(params, 'range', RANGES, '12m')
+  const histLevel = oneOf(params, 'hl', LEVELS, 'group')
+  const histKind = oneOf(params, 'hk', ['expense', 'income'] as const, 'expense')
+  const histAll = params.get('hall') === '1'
+  const netMode = oneOf(params, 'net', ['waterfall', 'monthly'] as const, 'waterfall')
+  const incLevel = oneOf(params, 'inc', LEVELS, 'category')
+  const expLevel = oneOf(params, 'exp', LEVELS, 'group')
+  const ms = useUrlSort({ merchant: 'asc', count: 'desc', spent: 'desc' }, null, 'msort')
   const [thisYear] = useState(() => new Date().getFullYear())
   const span = useQuery({ queryKey: ['analytics', 'span'], queryFn: () => get<{ start: string | null; end: string | null }>('/analytics/span') })
   const firstYear = span.data?.start ? Number(span.data.start.slice(0, 4)) : thisYear
   const years = Array.from({ length: thisYear - firstYear + 1 }, (_, i) => thisYear - i)
-  const [fromYear, setFromYear] = useState(thisYear - 1)
-  const [toYear, setToYear] = useState(thisYear)
+  const fromYear = numParam(params, 'from') ?? thisYear - 1
+  const toYear = numParam(params, 'to') ?? thisYear
   const { start, end } = rangeDates(range, firstYear, fromYear, toYear)
   const month = params.get('month')
+  const pickMonth = (m: string | null) => set({ month: m })
   const focus = month ? { start: month, end: monthEnd(month) } : { start, end }
 
   const flow = useQuery({ queryKey: ['analytics', 'cashflow', start, end], queryFn: () => get<CashflowMonth[]>('/analytics/cashflow', { start, end }) })
@@ -68,7 +74,8 @@ export function Reports() {
     queryKey: ['analytics', 'merchants', focus.start, focus.end],
     queryFn: () => get<Merchant[]>('/analytics/merchants', { ...focus, limit: 12 }),
   })
-  const [openGroup, setOpenGroup] = useState<string | null>(null)
+  const openGroup = params.get('open')
+  const setOpenGroup = (g: string | null) => set({ open: g }, { replace: true })
 
   const totals = (flow.data ?? []).reduce((a, m) => ({ inc: a.inc + m.income, exp: a.exp + m.expenses }), { inc: 0, exp: 0 })
   const n = Math.max(1, flow.data?.length ?? 1)
@@ -116,7 +123,7 @@ export function Reports() {
           </div>
         </div>
         <div className="row">
-          <Seg name="range" value={range} onChange={setRange} options={[
+          <Seg name="range" value={range} onChange={(v) => set(v === 'years' ? { range: v } : { range: v === '12m' ? null : v, from: null, to: null })} options={[
             { value: '12m', label: '12 months' }, { value: '24m', label: '24 months' },
             { value: 'ytd', label: 'Year to date' }, { value: 'last_year', label: 'Last year' },
             { value: 'all', label: 'All time' }, { value: 'years', label: 'Years' },
@@ -124,12 +131,12 @@ export function Reports() {
           {range === 'years' && (
             <>
               <select className="input compact" aria-label="From year" value={fromYear}
-                onChange={(e) => { const y = Number(e.target.value); setFromYear(y); if (y > toYear) setToYear(y) }}>
+                onChange={(e) => { const y = Number(e.target.value); set({ from: y, to: Math.max(y, toYear) }) }}>
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
               <span className="text-muted">to</span>
               <select className="input compact" aria-label="To year" value={toYear}
-                onChange={(e) => { const y = Number(e.target.value); setToYear(y); if (y < fromYear) setFromYear(y) }}>
+                onChange={(e) => { const y = Number(e.target.value); set({ to: y, from: Math.min(y, fromYear) }) }}>
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </>
@@ -140,8 +147,8 @@ export function Reports() {
       <ErrorNote error={span.error || flow.error || cats.error || hist.error || merchants.error || incStack.error || expStack.error} />
 
       {([
-        { key: 'inc', kind: 'income', kicker: 'Income', total: totals.inc, q: incStack, lvl: incLevel, setLvl: setIncLevel },
-        { key: 'exp', kind: 'expense', kicker: 'Expenses', total: totals.exp, q: expStack, lvl: expLevel, setLvl: setExpLevel },
+        { key: 'inc', kind: 'income', kicker: 'Income', total: totals.inc, q: incStack, lvl: incLevel, dflt: 'category' },
+        { key: 'exp', kind: 'expense', kicker: 'Expenses', total: totals.exp, q: expStack, lvl: expLevel, dflt: 'group' },
       ] as const).map((c) => (
         <Card key={c.key}>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -149,11 +156,11 @@ export function Reports() {
               <div className="card-kicker">{c.kicker}</div>
               <div className="card-title">{moneyRound(c.total)} · {moneyRound(c.total / n)}/mo by {c.lvl === 'group' ? 'group' : 'category'}</div>
             </div>
-            <Seg name={`${c.key}-level`} value={c.lvl} onChange={c.setLvl}
+            <Seg<Level> name={`${c.key}-level`} value={c.lvl} onChange={(v) => set({ [c.key]: v === c.dflt ? null : v })}
               options={[{ value: 'group', label: 'Groups' }, { value: 'category', label: 'Categories' }]} />
           </div>
           <StackedBars months={c.q.data?.months ?? []} series={c.q.data?.series ?? []} highlight={month}
-            onPick={(m) => setParams({ month: m })} tip={stackTip(c.q, c.kind, c.lvl)} />
+            onPick={pickMonth} tip={stackTip(c.q, c.kind, c.lvl)} />
           <Legend items={[
             ...(c.q.data?.series ?? []).map((s, i) => ({ label: `${s.name} ${moneyRound(s.total / n)}/mo`, color: stackColor(s.name, i) })),
             { label: '12-mo avg', color: 'var(--color-text)', dashed: true },
@@ -173,12 +180,12 @@ export function Reports() {
               { label: 'Net increase', color: NET_UP }, { label: 'Net decrease', color: NET_DOWN },
               ...(netMode === 'monthly' ? [{ label: '12-mo avg', color: 'var(--color-text)' }] : []),
             ]} />
-            <Seg name="netmode" value={netMode} onChange={setNetMode} options={[
+            <Seg name="netmode" value={netMode} onChange={(v) => set({ net: v === 'waterfall' ? null : v })} options={[
               { value: 'waterfall', label: 'Waterfall' }, { value: 'monthly', label: 'Monthly' },
             ]} />
           </div>
         </div>
-        <NetChart data={flow.data ?? []} mode={netMode} onPick={(m) => setParams({ month: m })}
+        <NetChart data={flow.data ?? []} mode={netMode} onPick={pickMonth}
           tip={(m, ctx) => {
             const f = flow.data?.find((x) => x.month === m)
             return { title: `${monthName(m)} · net ${money(ctx.net, true)}`,
@@ -202,7 +209,7 @@ export function Reports() {
               <div className="card-kicker">Spending by group</div>
               <div className="card-title">{month ? parseIso(month).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : 'Whole range'}</div>
             </div>
-            {month && <Button variant="ghost" onClick={() => setParams({})}>Whole range</Button>}
+            {month && <Button variant="ghost" onClick={() => pickMonth(null)}>Whole range</Button>}
           </div>
           {groupList.map(([name, g]) => (
             <div key={name} className="stack" style={{ gap: 2 }}>
@@ -237,9 +244,10 @@ export function Reports() {
         <Card style={{ gap: 'var(--space-2)' }}>
           <div className="card-kicker">Top merchants</div>
           <table className="table" style={{ fontSize: 13 }}>
-            <thead><tr><th>Merchant</th><th style={{ textAlign: 'right' }}>Count</th><th style={{ textAlign: 'right' }}>Spent</th></tr></thead>
+            <thead><tr><SortTh s={ms} k="merchant">Merchant</SortTh><SortTh s={ms} k="count" right>Count</SortTh>
+              <SortTh s={ms} k="spent" right>Spent</SortTh></tr></thead>
             <tbody>
-              {(merchants.data ?? []).map((m) => (
+              {sortRows(merchants.data ?? [], ms, { merchant: (m) => m.example, count: (m) => m.count, spent: (m) => m.spent }).map((m) => (
                 <tr key={m.merchant} {...tipHandlers(tip, () => ({ title: m.example, lines: [`${money(m.spent)} · ${m.count} transactions`],
                   contrib: { ...focus, merchant: m.merchant }, show: 'transactions' }))}>
                   <td><Link to={merchantPath(m.merchant)}>{m.example}</Link></td>
@@ -258,14 +266,14 @@ export function Reports() {
             <div className="card-title">{histKind === 'expense' ? 'Expenses' : 'Income'} by {histLevel === 'group' ? 'group' : 'category'}</div>
           </div>
           <div className="row">
-            <Seg name="hist-kind" value={histKind} onChange={setHistKind}
+            <Seg name="hist-kind" value={histKind} onChange={(v) => set({ hk: v === 'expense' ? null : v })}
               options={[{ value: 'expense', label: 'Expenses' }, { value: 'income', label: 'Income' }]} />
-            <Seg name="hist-level" value={histLevel} onChange={setHistLevel}
+            <Seg name="hist-level" value={histLevel} onChange={(v) => set({ hl: v === 'group' ? null : v })}
               options={[{ value: 'group', label: 'Groups' }, { value: 'category', label: 'Categories' }]} />
           </div>
         </div>
         <SeriesHistory months={hist.data?.months ?? []} series={histSeries} highlight={month}
-          onPick={(m) => setParams({ month: m })}
+          onPick={pickMonth}
           label={(si, avg) => {
             const s = histSeries[si]
             const to = s.id ? (histLevel === 'group' ? groupPath(s.id) : categoryPath(s.id)) : null
@@ -285,7 +293,7 @@ export function Reports() {
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div className="card-meta">Each row has its own scale; the dashed line is the average for the range. Hover a bar for its top merchants.</div>
           {(hist.data?.series.length ?? 0) > 10 && (
-            <Button variant="ghost" onClick={() => setHistAll(!histAll)}>
+            <Button variant="ghost" onClick={() => set({ hall: !histAll })}>
               {histAll ? 'Show top 10' : `Show all ${hist.data?.series.length}`}
             </Button>
           )}

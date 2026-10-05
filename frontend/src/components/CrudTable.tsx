@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { del, post, put } from '../api'
-import { Button, Card, ErrorNote, Swatch } from './ui'
+import { sortRows, useUrlSort, type Dir } from '../urlState'
+import { Button, Card, ErrorNote, SortTh, Swatch } from './ui'
 
 export type Column = {
   key: string
@@ -82,6 +83,16 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
     setDraft(row ? { ...row } : { ...defaults })
   }
   const valid = columns.every((c) => !c.required || (draft[c.key] !== null && draft[c.key] !== undefined && draft[c.key] !== ''))
+  const sort = useUrlSort(Object.fromEntries(columns.map((c) => [c.key, c.kind === 'number' || c.kind === 'bool' ? 'desc' : 'asc'])) as Record<string, Dir>)
+  const sortValue = (c: Column) => (row: Row) => {
+    const custom = display?.(row, c.key)
+    if (custom !== undefined) return custom
+    const v = row[c.key]
+    if (c.kind === 'bool') return v ? 1 : 0
+    if (c.kind === 'select') return c.options?.find((o) => o.value === v)?.label ?? (v as string | null)
+    return typeof v === 'number' || typeof v === 'string' ? v : null
+  }
+  const rows = sortRows(query.data ?? [], sort, Object.fromEntries(columns.map((c) => [c.key, sortValue(c)])))
 
   const show = (row: Row, col: Column): ReactNode => {
     const custom = display?.(row, col.key)
@@ -122,11 +133,11 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
       <div style={{ overflowX: 'auto' }}>
       <table className="table">
         <thead>
-          <tr>{columns.map((c) => <th key={c.key} style={c.width ? { width: c.width } : undefined}>{c.label}</th>)}<th /></tr>
+          <tr>{columns.map((c) => <SortTh key={c.key} s={sort} k={c.key} style={c.width ? { width: c.width } : undefined}>{c.label}</SortTh>)}<th /></tr>
         </thead>
         <tbody>
           {editId === 'new' && editRow('new')}
-          {(query.data ?? []).map((row) =>
+          {rows.map((row) =>
             editId === row.id ? (
               editRow(row.id)
             ) : (

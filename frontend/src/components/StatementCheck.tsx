@@ -8,8 +8,9 @@ import {
 import { fullDate, money, shortDate } from '../format'
 import { useJob } from '../hooks'
 import { accountPath, txnPath } from '../links'
+import { oneOf, sortRows, useUrl, useUrlSort } from '../urlState'
 import { TableCard } from './Detail'
-import { Button, Card, ErrorNote, ProgressBar, Seg } from './ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from './ui'
 
 const STATUS_LABEL: Record<CheckStatus, string> = {
   ok: 'Matches', explained: 'Explained', mismatch: 'Differences', unverified: 'Not checked',
@@ -228,6 +229,9 @@ function AccountCheck({ b, c, multi, onApplied }: {
 }
 
 type Filter = CheckStatus | 'all'
+const FILTERS: Filter[] = ['mismatch', 'explained', 'ok', 'unverified', 'all']
+const amt = (v: string | null) => (v === null ? null : Number(v))
+const absAmt = (v: string | null) => (v === null ? null : Math.abs(Number(v)))
 
 const TIMELINE_LABEL: Record<Exclude<StatementTimelineItem['kind'], 'statement'>, string> = {
   review: 'Being imported', queued: 'In the backfill', missing: 'Missing',
@@ -240,6 +244,7 @@ const periodText = (s: string | null, e: string | null) =>
  * placeholders for statements still being imported or apparently missing. */
 export function AccountStatements({ accountId }: { accountId: number }) {
   const navigate = useNavigate()
+  const s = useUrlSort({ period: 'desc', statement: 'asc', stmt: 'desc', ledger: 'desc', diff: 'desc', check: 'asc' }, null, 'ssort')
   const list = useQuery({
     queryKey: ['statement-checks', 'timeline', accountId],
     queryFn: () => get<StatementTimelineItem[]>('/statement-checks/timeline', { account_id: accountId }),
@@ -247,6 +252,11 @@ export function AccountStatements({ accountId }: { accountId: number }) {
   const items = list.data ?? []
   if (list.error) return <ErrorNote error={list.error} />
   if (!items.length) return null
+  const sorted = sortRows(items, s, {
+    period: (i) => i.period_end ?? i.period_start, statement: (i) => i.filename ?? (i.import_batch_id ? `Import #${i.import_batch_id}` : null),
+    stmt: (i) => amt(i.statement_total), ledger: (i) => amt(i.ledger_total), diff: (i) => absAmt(i.difference),
+    check: (i) => (i.kind === 'statement' ? i.status : i.kind),
+  })
   const count = (k: StatementTimelineItem['kind']) => items.filter((i) => i.kind === k).length
   const missing = items.filter((i) => i.kind === 'missing').reduce((n, i) => n + (i.estimated ?? 1), 0)
   const inProgress = count('review') + count('queued')
@@ -270,13 +280,13 @@ export function AccountStatements({ accountId }: { accountId: number }) {
         <table className="table">
           <thead>
             <tr>
-              <th>Period</th><th>Statement</th>
-              <th style={{ textAlign: 'right' }}>On statement</th><th style={{ textAlign: 'right' }}>In ledger</th>
-              <th style={{ textAlign: 'right' }}>Difference</th><th>Check</th>
+              <SortTh s={s} k="period">Period</SortTh><SortTh s={s} k="statement">Statement</SortTh>
+              <SortTh s={s} k="stmt" right>On statement</SortTh><SortTh s={s} k="ledger" right>In ledger</SortTh>
+              <SortTh s={s} k="diff" right>Difference</SortTh><SortTh s={s} k="check">Check</SortTh>
             </tr>
           </thead>
           <tbody>
-            {items.map((i, n) => (
+            {sorted.map((i, n) => (
               <tr key={`${i.kind}:${i.import_batch_id ?? i.backfill_file_id ?? n}`}
                 className={[i.kind === 'missing' ? 'row-missing' : i.kind !== 'statement' ? 'row-pending' : '',
                   i.import_batch_id || i.backfill_file_id ? 'clickable' : ''].join(' ')}
@@ -315,7 +325,10 @@ export function AccountStatements({ accountId }: { accountId: number }) {
 export function StatementChecksPanel() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState<Filter>('mismatch')
+  const [params, set] = useUrl()
+  const filter = oneOf(params, 'checks', FILTERS, 'mismatch')
+  const setFilter = (v: Filter) => set({ checks: v === 'mismatch' ? null : v })
+  const cs = useUrlSort({ statement: 'asc', account: 'asc', period: 'desc', stmt: 'desc', ledger: 'desc', diff: 'desc' }, null, 'csort')
   const list = useQuery({
     queryKey: ['statement-checks', filter],
     queryFn: () => get<StatementCheckList>('/statement-checks', { status: filter === 'all' ? undefined : filter }),
@@ -385,12 +398,17 @@ export function StatementChecksPanel() {
         <table className="table" style={{ fontSize: 13 }}>
           <thead>
             <tr>
-              <th>Statement</th><th>Account</th><th>Period</th><th style={{ textAlign: 'right' }}>Statement</th>
-              <th style={{ textAlign: 'right' }}>Ledger</th><th style={{ textAlign: 'right' }}>Difference</th><th>Findings</th>
+              <SortTh s={cs} k="statement">Statement</SortTh><SortTh s={cs} k="account">Account</SortTh>
+              <SortTh s={cs} k="period">Period</SortTh><SortTh s={cs} k="stmt" right>Statement</SortTh>
+              <SortTh s={cs} k="ledger" right>Ledger</SortTh><SortTh s={cs} k="diff" right>Difference</SortTh><th>Findings</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((c) => (
+            {sortRows(items, cs, {
+              statement: (c) => c.filename ?? `Import #${c.import_batch_id}`, account: (c) => c.account_name ?? c.account_ref,
+              period: (c) => c.period_start, stmt: (c) => amt(c.statement_total), ledger: (c) => amt(c.ledger_total),
+              diff: (c) => absAmt(c.difference),
+            }).map((c) => (
               <tr key={`${c.import_batch_id}:${c.account_ref}`} className="clickable"
                 onClick={() => navigate(`/import/${c.import_batch_id}`)}>
                 <td>{c.filename ?? `Import #${c.import_batch_id}`}</td>

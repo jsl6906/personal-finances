@@ -1,64 +1,44 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { get, post, type Job, type Transaction, type TransactionPage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
-import { Button, Card, ErrorNote, ProgressBar, Seg } from '../components/ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from '../components/ui'
 import { money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
-import { useAccounts, useDebounced, useJob } from '../hooks'
+import { useAccounts, useJob } from '../hooks'
 import { accountPath, categoryPath } from '../links'
+import { TXN_SORT } from '../detail'
+import { numParam, oneOf, useKeyedState, useUrl, useUrlSort, useUrlText, type Patch } from '../urlState'
 import { TransactionDetail, RulePrompt } from './TransactionDetail'
 
-type Status = 'all' | 'uncategorized' | 'suggested' | 'with_statement'
-type SortKey = 'date' | 'description' | 'category' | 'account' | 'amount'
-type Sort = `${SortKey}_${'asc' | 'desc'}`
+const STATUSES = ['all', 'uncategorized', 'suggested', 'with_statement'] as const
+const PERIOD_KEYS = PERIODS.map((p) => p.key)
 const PAGE = 100
-
-function SortTh({ k, sort, onSort, children, className, right }: {
-  k: SortKey; sort: Sort; onSort: (s: Sort) => void; children: string; className?: string; right?: boolean
-}) {
-  const [key, dir] = sort.split('_') as [SortKey, 'asc' | 'desc']
-  const active = key === k
-  const first = k === 'date' || k === 'amount' ? 'desc' : 'asc'
-  return (
-    <th className={className} style={right ? { textAlign: 'right' } : undefined}
-      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <button type="button" className={`th-sort${active ? ' active' : ''}`}
-        onClick={() => onSort(`${k}_${active ? (dir === 'asc' ? 'desc' : 'asc') : first}`)}>
-        {children}<span className="th-sort-arrow">{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
-      </button>
-    </th>
-  )
-}
 
 export function Transactions() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const batchId = searchParams.get('batch') ? Number(searchParams.get('batch')) : null
-  const ruleId = searchParams.get('rule') ? Number(searchParams.get('rule')) : null
+  const [searchParams, set] = useUrl()
+  const batchId = numParam(searchParams, 'batch')
+  const ruleId = numParam(searchParams, 'rule')
   const urlCats = useMemo(() => (searchParams.get('categories') ?? '').split(',').filter(Boolean).map(Number), [searchParams])
   const urlLabel = searchParams.get('label')
-  const dropParams = (...keys: string[]) => setSearchParams((prev) => {
-    const next = new URLSearchParams(prev)
-    for (const k of keys) next.delete(k)
-    return next
-  })
   const accounts = useAccounts()
-  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
-  const q = useDebounced(search)
-  const [status, setStatus] = useState<Status>('all')
-  const [period, setPeriod] = useState<PeriodKey>(searchParams.get('start') || searchParams.get('end') ? 'custom'
-    : batchId || ruleId || searchParams.get('q') ? 'all' : 'last_90')
-  const [dateStart, setDateStart] = useState(() => searchParams.get('start') ?? '')
-  const [dateEnd, setDateEnd] = useState(() => searchParams.get('end') ?? '')
-  const [accountId, setAccountId] = useState<number | null>(null)
-  const [categoryId, setCategoryId] = useState<number | null>(() =>
-    searchParams.get('category') ? Number(searchParams.get('category')) : null)
-  const [offset, setOffset] = useState(0)
-  const [sort, setSort] = useState<Sort>('date_desc')
-  const [selected, setSelected] = useState<number | 'new' | null>(null)
-  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [search, setSearch, q] = useUrlText('q', ['page'])
+  const status = oneOf(searchParams, 'status', STATUSES, 'all')
+  const dateStart = searchParams.get('start') ?? ''
+  const dateEnd = searchParams.get('end') ?? ''
+  const period = oneOf<PeriodKey>(searchParams, 'period', PERIOD_KEYS,
+    dateStart || dateEnd ? 'custom' : batchId || ruleId ? 'all' : 'last_90')
+  const accountId = numParam(searchParams, 'account')
+  const categoryId = numParam(searchParams, 'category')
+  const page = Math.max(1, numParam(searchParams, 'page') ?? 1)
+  const offset = (page - 1) * PAGE
+  const sort = useUrlSort(TXN_SORT, 'date_desc', 'sort', ['page'])
+  const txnParam = searchParams.get('txn')
+  const selected: number | 'new' | null = txnParam === 'new' ? 'new' : numParam(searchParams, 'txn')
+  // Opening a transaction pushes a history entry (Back closes it); moving between open ones replaces it.
+  const select = (v: number | 'new' | null, replace = selected !== null && v !== null) => set({ txn: v }, { replace })
   const [bulkCategory, setBulkCategory] = useState<number | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
   const [bulkPrompt, setBulkPrompt] = useState<{ txn: Transaction; categoryId: number } | { done: string } | null>(null)
@@ -68,17 +48,11 @@ export function Transactions() {
     : periodRange(period)
   const params = {
     q, status, ...range, account_id: accountId ?? undefined,
-    category_id: categoryId ?? (urlCats.length ? urlCats : undefined), limit: PAGE, offset, sort,
-    import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
+    category_id: categoryId ?? (urlCats.length ? urlCats : undefined), limit: PAGE, offset,
+    sort: `${sort.key}_${sort.dir}`, import_batch_id: batchId ?? undefined, rule_id: ruleId ?? undefined,
   }
-  const resetPage = () => {
-    setOffset(0)
-    setChecked(new Set())
-  }
-  const onFilter = <T,>(setter: (v: T) => void) => (v: T) => {
-    setter(v)
-    resetPage()
-  }
+  const [checked, setChecked] = useKeyedState(JSON.stringify(params), () => new Set<number>())
+  const filter = (patch: Patch) => set({ ...patch, page: null })
 
   const list = useQuery({
     queryKey: ['transactions', params],
@@ -158,50 +132,53 @@ export function Transactions() {
         </div>
         <div className="row">
           <input className="input" placeholder="Search description, notes, amount…" style={{ width: 260, maxWidth: '100%' }} value={search}
-            onChange={(e) => onFilter(setSearch)(e.target.value)} />
+            onChange={(e) => setSearch(e.target.value)} />
           <Button onClick={() => suggest.mutate()} disabled={suggest.isPending || !!jobRunning}
             title="Apply categorization rules, then ask Gemini to suggest categories for uncategorized rows">
             {checked.size ? `Suggest categories (${checked.size})` : 'Suggest categories'}
           </Button>
           <Button onClick={() => scan.mutate()} disabled={scan.isPending}>Scan for duplicates</Button>
-          <Button onClick={() => setSelected('new')}>New transaction</Button>
+          <Button onClick={() => select('new')}>New transaction</Button>
           <Button variant="primary" onClick={() => navigate('/import')}>Import</Button>
         </div>
       </header>
 
       <div className="row-3">
-        <Seg name="status" value={status} onChange={onFilter(setStatus)} options={[
+        <Seg name="status" value={status} onChange={(v) => filter({ status: v === 'all' ? null : v })} options={[
           { value: 'all', label: 'All' }, { value: 'uncategorized', label: 'Uncategorized' }, { value: 'suggested', label: 'AI suggested' },
           { value: 'with_statement', label: 'With statements' },
         ]} />
-        <select className="input compact" value={period} onChange={(e) => onFilter(setPeriod)(e.target.value as PeriodKey)}>
+        <select className="input compact" value={period} onChange={(e) => {
+          const v = e.target.value as PeriodKey
+          filter(v === 'custom' ? { period: v } : { period: v, start: null, end: null })
+        }}>
           {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         {period === 'custom' && <>
           <input className="input compact" type="date" aria-label="Start date" value={dateStart}
-            max={dateEnd || undefined} onChange={(e) => onFilter(setDateStart)(e.target.value)} />
+            max={dateEnd || undefined} onChange={(e) => filter({ start: e.target.value, period: 'custom' })} />
           <input className="input compact" type="date" aria-label="End date" value={dateEnd}
-            min={dateStart || undefined} onChange={(e) => onFilter(setDateEnd)(e.target.value)} />
+            min={dateStart || undefined} onChange={(e) => filter({ end: e.target.value, period: 'custom' })} />
         </>}
         <select className="input compact" value={accountId ?? ''}
-          onChange={(e) => onFilter(setAccountId)(e.target.value ? Number(e.target.value) : null)}>
+          onChange={(e) => filter({ account: e.target.value || null })}>
           <option value="">All accounts</option>
           {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <CategorySelect className="input compact" value={categoryId} emptyLabel="All categories"
-          onChange={(v) => { if (urlCats.length) dropParams('categories', 'label'); onFilter(setCategoryId)(v) }} />
+          onChange={(v) => filter({ category: v, categories: null, label: null })} />
         {urlCats.length > 0 && (
-          <button className="tag tag-outline chip" onClick={() => { dropParams('categories', 'label'); resetPage() }}>
+          <button className="tag tag-outline chip" onClick={() => filter({ categories: null, label: null })}>
             {urlLabel ?? `${urlCats.length} categories`} ×
           </button>
         )}
         {batchId && (
-          <button className="tag tag-outline chip" onClick={() => { setSearchParams({}); resetPage() }}>
+          <button className="tag tag-outline chip" onClick={() => filter({ batch: null, period })}>
             Import #{batchId} ×
           </button>
         )}
         {ruleId && (
-          <button className="tag tag-outline chip" onClick={() => { setSearchParams({}); resetPage() }}>
+          <button className="tag tag-outline chip" onClick={() => filter({ rule: null, period })}>
             Categorized by rule #{ruleId} ×
           </button>
         )}
@@ -261,17 +238,17 @@ export function Transactions() {
                   <input type="checkbox" checked={allChecked}
                     onChange={() => setChecked(allChecked ? new Set() : new Set(items.map((t) => t.id)))} />
                 </th>
-                <SortTh k="date" sort={sort} onSort={onFilter(setSort)}>Date</SortTh>
-                <SortTh k="description" sort={sort} onSort={onFilter(setSort)}>Description</SortTh>
-                <SortTh k="category" sort={sort} onSort={onFilter(setSort)}>Category</SortTh>
-                <SortTh k="account" sort={sort} onSort={onFilter(setSort)} className="hide-sm">Account</SortTh>
+                <SortTh s={sort} k="date">Date</SortTh>
+                <SortTh s={sort} k="description">Description</SortTh>
+                <SortTh s={sort} k="category">Category</SortTh>
+                <SortTh s={sort} k="account" className="hide-sm">Account</SortTh>
                 <th className="hide-sm"></th>
-                <SortTh k="amount" sort={sort} onSort={onFilter(setSort)} right>Amount</SortTh>
+                <SortTh s={sort} k="amount" right>Amount</SortTh>
               </tr>
             </thead>
             <tbody>
               {items.map((t) => (
-                <tr key={t.id} className={`clickable${selected === t.id ? ' selected' : ''}`} onClick={() => setSelected(t.id)}>
+                <tr key={t.id} className={`clickable${selected === t.id ? ' selected' : ''}`} onClick={() => select(t.id)}>
                   <td className="check" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={checked.has(t.id)} onChange={() => toggle(t.id)} />
                   </td>
@@ -310,20 +287,20 @@ export function Transactions() {
             <div className="table-foot">
               <span className="text-muted">{offset + 1}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()}</span>
               <div className="row">
-                <Button variant="ghost" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</Button>
-                <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</Button>
+                <Button variant="ghost" disabled={page === 1} onClick={() => set({ page: page > 2 ? page - 1 : null })}>Previous</Button>
+                <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => set({ page: page + 1 })}>Next</Button>
               </div>
             </div>
           )}
         </Card>
         {selected === 'new' && (
-          <TransactionDetail key={`new-${accountId}`} txn={null} defaultAccountId={accountId} onClose={() => setSelected(null)}
-            onSaved={(t) => setSelected(t.id)} />
+          <TransactionDetail key={`new-${accountId}`} txn={null} defaultAccountId={accountId} onClose={() => select(null)}
+            onSaved={(t) => select(t.id, true)} />
         )}
         {typeof selected === 'number' && detailTxn && (
           // Keyed on updated_at so a saved/refreshed record resets the form, but unrelated refetches don't.
-          <TransactionDetail key={`${detailTxn.id}-${detailTxn.updated_at}`} txn={detailTxn} onClose={() => setSelected(null)}
-            onSaved={(t) => setSelected(t.id)} />
+          <TransactionDetail key={`${detailTxn.id}-${detailTxn.updated_at}`} txn={detailTxn} onClose={() => select(null)}
+            onSaved={(t) => select(t.id, true)} />
         )}
       </div>
     </section>

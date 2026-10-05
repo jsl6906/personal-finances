@@ -1,26 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
 import { ANOMALY_LABEL, post, type Anomaly, type Job } from '../api'
 import { AnomalyList } from '../components/AnomalyList'
 import { Button, Card, ErrorNote, Seg } from '../components/ui'
 import { monthLabel, parseIso } from '../format'
 import { useAnomalies, useJob } from '../hooks'
+import { oneOf, useUrl } from '../urlState'
 
 type Status = 'open' | 'reviewed' | 'dismissed' | 'withdrawn'
+const STATUSES: Status[] = ['open', 'reviewed', 'dismissed', 'withdrawn']
 
 export function Findings() {
   const qc = useQueryClient()
-  const [params, setParams] = useSearchParams()
-  const status = (params.get('status') as Status | null) ?? 'open'
+  const [params, set] = useUrl()
+  const status = oneOf<Status>(params, 'status', STATUSES, 'open')
   const kind = params.get('kind') ?? 'all'
-  const setFilter = (k: string, v: string, dflt: string) => {
-    const next = new URLSearchParams(params)
-    if (v === dflt) next.delete(k)
-    else next.set(k, v)
-    if (k === 'status') next.delete('kind')
-    setParams(next, { replace: true })
-  }
+  const setFilter = (k: 'status' | 'kind', v: string, dflt: string) =>
+    set({ [k]: v === dflt ? null : v, ...(k === 'status' ? { kind: null } : {}) })
   const anomalies = useAnomalies(status)
   const open = useAnomalies('open')
   const [jobId, setJobId] = useState<number | null>(null)

@@ -2,19 +2,26 @@ import { useState } from 'react'
 import type { BreakdownRow, CategoryType, EntityMonth } from './api'
 import { iso, monthLabel, parseIso } from './format'
 import { accountPath, categoryPath, groupPath } from './links'
+import { oneOf, useUrl } from './urlState'
 
 export type DetailRange = '12m' | '24m' | '5y' | 'all'
 const BACK: Record<DetailRange, number> = { '12m': 11, '24m': 23, '5y': 59, all: 0 }
+const RANGES = Object.keys(BACK) as DetailRange[]
 
-/** Range + picked-month state shared by the detail pages; `start` is undefined for all time. */
+/** Server-side sort columns of /transactions and the direction each starts in. */
+export const TXN_SORT = { date: 'desc', description: 'asc', category: 'asc', account: 'asc', amount: 'desc' } as const
+
+/** Range + picked-month state shared by the detail pages, kept in the URL (`range`, `month`); `start` is undefined
+ * for all time. Changing either resets the transaction list's page. */
 export function useDetailRange(initial: DetailRange) {
-  const [range, setRangeRaw] = useState<DetailRange>(initial)
-  const [month, setMonth] = useState<string | null>(null)
+  const [params, set] = useUrl()
+  const range = oneOf(params, 'range', RANGES, initial)
+  const month = params.get('month')
   const [today] = useState(() => new Date())
   const start = range === 'all' ? undefined : iso(new Date(today.getFullYear(), today.getMonth() - BACK[range], 1))
-  const setRange = (r: DetailRange) => { setRangeRaw(r); setMonth(null) }
-  const pick = (m: string) => setMonth(month === m ? null : m)
-  return { range, setRange, start, month, pick, clearMonth: () => setMonth(null) }
+  const setRange = (r: DetailRange) => set({ range: r === initial ? null : r, month: null, page: null })
+  const pick = (m: string) => set({ month: month === m ? null : m, page: null })
+  return { range, setRange, start, month, pick, clearMonth: () => set({ month: null, page: null }) }
 }
 
 /** "January 2020 – September 2026" style label for a detail range. */
