@@ -499,7 +499,9 @@ async def statuses(conn, batch_ids: list[int]) -> dict[int, list[tuple]]:
     return out
 
 
-async def backup(conn, now: datetime, accounts: list[int], batches: list[int]) -> Path:
+async def backup(
+    conn, now: datetime, accounts: list[int], batches: list[int], prefix: str = "untangle_legacy"
+) -> Path:
     async def rows(sql: str, **p) -> list[dict]:
         return [dict(r._mapping) for r in await q(conn, sql, **p)]
 
@@ -526,7 +528,7 @@ async def backup(conn, now: datetime, accounts: list[int], batches: list[int]) -
         ),
         "import_batch": await rows("SELECT id, defaults, doc_meta, stats FROM import_batch WHERE id = ANY(:b)", b=batches),
     }
-    out = ROOT / "logs" / f"untangle_legacy_backup_{now:%Y%m%d%H%M%S}.json"
+    out = ROOT / "logs" / f"{prefix}_backup_{now:%Y%m%d%H%M%S}.json"
     out.write_text(json.dumps(data, default=str), encoding="utf-8")
     return out
 
