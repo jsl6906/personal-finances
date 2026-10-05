@@ -128,6 +128,8 @@ function AccountCheck({ b, c, multi, onApplied }: {
           shifted > 0 && `counts ${shifted} matched transaction${shifted === 1 ? '' : 's'} dated just outside the period`,
           listed > 0 && `leaves out ${listed} listed on another statement (${money(c.detail.listed_elsewhere?.total ?? 0)})`,
         ].filter(Boolean).join(' and ')}.`}
+        {c.detail.fixes_reconcile && ' Together the suggested fixes close the difference to the cent, so each is more'
+          + ' likely right.'}
       </div>
       {c.detail.message && (
         <div className="callout">

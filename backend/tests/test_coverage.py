@@ -246,6 +246,50 @@ async def test_edge_transaction_on_another_statement_takes_its_date(client, monk
     assert sep_check["status"] == "ok"
 
 
+async def test_feed_holds_reversals_and_pending_amounts_are_explained(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Holds", "mask": "6610"})).json()["id"]
+    await _txn(client, acct, "2022-03-15", "HOLDS GROCER", "-40.00")
+    await _txn(client, acct, "2022-04-12", "TIPPY CAFE", "-23.00")
+    hold = await _txn(client, acct, "2022-03-30", "HOLDS MARKETPLACE", "-9.99")
+    release = await _txn(client, acct, "2022-04-01", "HOLDS MARKETPLACE REFUND", "9.99")
+    tip = await _txn(client, acct, "2022-04-10", "TIPPY CAFE", "-20.00")
+    mar = await _statement(
+        client,
+        monkeypatch,
+        "cov_holds_mar.pdf",
+        "6610",
+        ("2022-03-01", "2022-03-31"),
+        -40.00,
+        [("2022-03-15", "HOLDS GROCER", -40.00)],
+    )
+    await client.post(f"/api/imports/{mar}/commit", json={})
+    apr = await _statement(
+        client,
+        monkeypatch,
+        "cov_holds_apr.pdf",
+        "6610",
+        ("2022-04-01", "2022-04-30"),
+        -23.00,
+        [("2022-04-12", "TIPPY CAFE", -23.00)],
+    )
+    [c] = (await client.get(f"/api/imports/{apr}/checks")).json()
+    issues = {i["transaction_id"]: i for i in c["detail"]["issues"]}
+    # The March statement is imported, so a release on 1 April isn't waiting to appear there.
+    assert issues[release]["kind"] == "extra" and issues[release]["suggested"]
+    assert issues[release]["hint"].startswith("Cancels out -9.99")
+    assert issues[tip]["kind"] == "extra"
+    assert issues[tip]["hint"].startswith("Probably the pending amount of TIPPY CAFE")
+    # Together the two removals close the difference exactly, which lifts both (85 -> 95) past the auto threshold.
+    assert c["detail"]["fixes_reconcile"] and issues[release]["confidence"] == issues[tip]["confidence"] == 95
+    d = (await client.post(f"/api/imports/{apr}/commit", json={})).json()
+    assert d["stats"]["auto_fixed"] == 2
+    assert (await client.get(f"/api/transactions/{tip}")).status_code == 404
+    [c] = (await client.get(f"/api/imports/{apr}/checks")).json()
+    assert c["status"] == "ok"
+    [c] = (await client.get(f"/api/imports/{mar}/checks")).json()
+    assert [(i["transaction_id"], i["kind"]) for i in c["detail"]["issues"]] == [(hold, "extra")]
+
+
 async def test_matched_rows_dated_before_the_period_count_toward_the_ledger(client, monkeypatch):
     acct = (await client.post("/api/accounts", json={"name": "Coverage Boundary", "mask": "6609"})).json()["id"]
     await _txn(client, acct, "2022-02-28", "BOUNDARY SHOP", "-26.92")
@@ -295,17 +339,17 @@ async def test_removed_feed_copy_lends_its_name_to_the_statement_copy(client, mo
     feed = await _txn(client, acct, "2021-11-17", "INVEST529 PAYMENT", "-75.00")
     rows = [("2021-11-17", "ACH WITHDRAWAL", -75.00), ("2021-11-20", "NAMES GROCER", -10.00)]
     bid = await _statement(client, monkeypatch, "cov_nov.pdf", "6607", ("2021-11-01", "2021-11-30"), -85.00, rows)
-    # The statement row is kept as its own transaction, leaving the feed's copy as a duplicate.
-    await client.post(f"/api/imports/{bid}/commit", json={"pending_as": "keep"})
+    # The statement row is kept as its own transaction, leaving the feed's copy as a duplicate. Removing it closes the
+    # difference exactly, so the removal is confident enough to happen at commit.
+    d = (await client.post(f"/api/imports/{bid}/commit", json={"pending_as": "keep"})).json()
+    assert d["stats"]["auto_fixed"] == 1
+    assert (await client.get(f"/api/transactions/{feed}")).status_code == 404
     [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
-    [extra] = [i for i in c["detail"]["issues"] if i["kind"] == "extra"]
-    assert extra["transaction_id"] == feed and extra["keep_id"]
-
-    r = await client.post(f"/api/imports/{bid}/checks/fix", json={"fixes": [{"fix": "remove", "transaction_id": feed}]})
-    assert r.json()["checks"][0]["status"] == "ok"
-    kept = (await client.get(f"/api/transactions/{extra['keep_id']}")).json()
+    assert c["status"] == "ok"
+    page = (await client.get("/api/transactions", params={"import_batch_id": bid, "q": "INVEST529"})).json()
+    [kept] = page["items"]
     assert kept["description"] == "INVEST529 PAYMENT"
-    notes = [n["body"] for n in (await client.get(f"/api/transactions/{extra['keep_id']}/notes")).json()]
+    notes = [n["body"] for n in (await client.get(f"/api/transactions/{kept['id']}/notes")).json()]
     assert "Also described as: ACH WITHDRAWAL" in notes
 
 

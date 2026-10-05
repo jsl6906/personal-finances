@@ -46,6 +46,8 @@ SIMILAR = 0.6
 CENT = Decimal("0.005")
 ACTIONABLE = ("missing", "extra", "amount", "link")
 AUTO_CONFIDENCE = 90  # suggested fixes at least this confident are applied without review
+RECONCILE_BOOST = 10  # added when the suggested fixes together close the difference exactly
+RECONCILE_MAX = 95
 
 
 @dataclass
@@ -409,6 +411,60 @@ async def _check_account(
     def near(t: _Txn) -> bool:
         return (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
 
+    neighbours = (
+        await session.execute(
+            select(StatementCheck.period_start, StatementCheck.period_end)
+            .join(ImportBatch, ImportBatch.id == StatementCheck.import_batch_id)
+            .where(
+                StatementCheck.account_id == account_id,
+                StatementCheck.import_batch_id != batch.id,
+                ImportBatch.attachment_id.is_distinct_from(batch.attachment_id),
+                ImportBatch.status == "committed",
+                StatementCheck.period_start.is_not(None),
+                StatementCheck.period_end.is_not(None),
+            )
+        )
+    ).all()
+
+    def unchecked_edge(t: _Txn) -> bool:
+        """Near an edge whose neighbouring statement isn't imported, so it may yet turn up there."""
+        sides = [
+            (t.date - ps).days < EDGE_DAYS and ps - timedelta(days=1),
+            (pe - t.date).days < EDGE_DAYS and pe + timedelta(days=1),
+        ]
+        return any(d and not any(a <= d <= b for a, b in neighbours) for d in sides)
+
+    def reversal(t: _Txn) -> _Txn | None:
+        """An opposite entry no statement lists either (a charge and its refund, or a pending hold and its release)."""
+        return min(
+            (
+                c
+                for c in L.values()
+                if c.id != t.id
+                and c.id not in claimed
+                and c.id not in others
+                and c.amount == -t.amount
+                and abs((c.date - t.date).days) <= MATCH_DAYS
+            ),
+            key=lambda c: (abs((c.date - t.date).days), c.id),
+            default=None,
+        )
+
+    def pending(t: _Txn) -> _Txn | None:
+        """The payee's only listed transaction a little later, for a bit more (a tip added when it posts)."""
+        payee = [
+            c
+            for c in L.values()
+            if c.id in claimed
+            and (c.amount > 0) == (t.amount > 0)
+            and 0 <= (c.date - t.date).days <= AMOUNT_DAYS
+            and _sim(c.description, c.merchant, t.description, t.merchant) >= SIMILAR
+        ]
+        if len(payee) != 1 or payee[0].id in finals:
+            return None
+        c = payee[0]
+        return c if abs(t.amount) < abs(c.amount) <= abs(t.amount) * Decimal("1.25") else None
+
     def redate(row: _Row, name: str, t: _Txn, hint: str, conf: int, counted: bool = True) -> dict:
         effect = -t.amount if counted and not ps <= row.date <= pe else Decimal(0)
         issue = _issue("listed", "date", row, t, effect, hint, suggested=True, confidence=conf)
@@ -425,6 +481,7 @@ async def _check_account(
     )
     used: set[int] = set()
     kept: set[int] = set()
+    finals: set[int] = set()
     for t in sorted(free, key=lambda t: (t.date, t.id)):
         twin = next(
             (
@@ -456,12 +513,18 @@ async def _check_account(
             used.add(row.id)
             hint = f"{name} lists it on {row.date.isoformat()}; nothing else accounts for it"
             issues.append(redate(row, name, t, hint, 90))
+        elif not twin and not unchecked_edge(t) and (other := reversal(t)):
+            hint = (
+                f"Cancels out {_money(other.amount)} {other.description} on {other.date.isoformat()}, "
+                "which no statement lists either"
+            )
+            issues.append(_issue("extra", "remove", None, t, -t.amount, hint, confidence=85))
         elif nearby and not (twin and twin_days <= 1):
             *_, row, name = nearby[0]
             hint = f"{name} lists {_money(row.amount)} on {row.date.isoformat()} as another transaction; likely a duplicate"
             issues.append(_issue("edge", "remove", None, t, -t.amount, hint, confidence=60))
         # A copy the statement lists within a day means a duplicate, not a transaction from the next statement.
-        elif near_edge and not (twin and twin_days <= 1):
+        elif near_edge and unchecked_edge(t) and not (twin and twin_days <= 1):
             hint = hint or "Close to the statement's start or end"
             issues.append(_issue("edge", "remove", None, t, -t.amount, hint, confidence=20))
         elif filed:
@@ -476,6 +539,13 @@ async def _check_account(
                 conf = 95 if twin_similar else 88
             else:
                 conf = 85 if twin and twin_similar else 75
+            if not twin and (final := pending(t)):
+                finals.add(final.id)
+                hint = (
+                    f"Probably the pending amount of {final.description} on {final.date.isoformat()}, "
+                    f"which the statement lists at {_money(final.amount)}"
+                )
+                conf = 85
             issue = _issue("extra", "remove", None, t, -t.amount, hint, confidence=conf)
             # The copy the statement lists survives; on removal it can take this one's name.
             keep = min(
@@ -527,6 +597,21 @@ async def _check_account(
             i["suggested"] = False
         elif i["suggested"] is None:
             i["suggested"] = i["kind"] in ACTIONABLE and trusted is not False and not reversed_signs
+
+    stmt_total = sum((s.amount for s in S), Decimal(0))
+    # The ledger on the statement's terms: matched transactions whatever their date, plus unmatched ones in the period
+    # that no other statement lists.
+    counted = [t for t in L.values() if t.id in claimed or (ps <= t.date <= pe and t.id not in others)]
+    listed = [t for t in L.values() if t.id not in claimed and ps <= t.date <= pe and t.id in others]
+    ledger_total = sum((t.amount for t in counted), Decimal(0)) + sum((s.amount for s in S if s.incoming), Decimal(0))
+    diff = stmt_total - ledger_total
+
+    # Fixes that together make a self-consistent statement and the ledger agree to the cent back each other up.
+    chosen = [i for i in issues if i["fix"] and i["suggested"]]
+    reconciles = bool(chosen) and trusted is True and abs(diff - sum(Decimal(i["effect"]) for i in chosen)) < CENT
+    if reconciles:
+        for i in chosen:
+            i["confidence"] = max(i["confidence"], min(i["confidence"] + RECONCILE_BOOST, RECONCILE_MAX))
     # Without the statement's own balances to vouch for its rows, a person should look first.
     cap = 99 if trusted else 85 if trusted is None else 0
     if reversed_signs or twins:
@@ -536,13 +621,6 @@ async def _check_account(
     for i in issues:
         i["confidence"] = min(i["confidence"], cap)
 
-    stmt_total = sum((s.amount for s in S), Decimal(0))
-    # The ledger on the statement's terms: matched transactions whatever their date, plus unmatched ones in the period
-    # that no other statement lists.
-    counted = [t for t in L.values() if t.id in claimed or (ps <= t.date <= pe and t.id not in others)]
-    listed = [t for t in L.values() if t.id not in claimed and ps <= t.date <= pe and t.id in others]
-    ledger_total = sum((t.amount for t in counted), Decimal(0)) + sum((s.amount for s in S if s.incoming), Decimal(0))
-    diff = stmt_total - ledger_total
     actionable = any(i["kind"] in ACTIONABLE for i in issues)
     status = "mismatch" if actionable else "ok" if abs(diff) < CENT and not issues else "explained"
     result.update(
@@ -556,6 +634,7 @@ async def _check_account(
         issues=issues,
         shifted=shifted,
         totals_match=abs(diff) < CENT,
+        fixes_reconcile=reconciles,
         listed_elsewhere={"count": len(listed), "total": str(sum((t.amount for t in listed), Decimal(0)))},
     )
     return result
