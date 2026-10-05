@@ -1,4 +1,4 @@
-import type { ReactNode, CSSProperties } from 'react'
+import { useState, type ReactNode, type CSSProperties, type InputHTMLAttributes } from 'react'
 import type { Sort } from '../urlState'
 
 export function Corners() {
@@ -86,6 +86,34 @@ export function Field({ label, children }: { label: string; children: ReactNode 
       <label>{label}</label>
       {children}
     </div>
+  )
+}
+
+type DateInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> & {
+  value: string
+  onChange: (v: string) => void
+}
+
+/** Date input that keeps typed text locally and only commits once the year is plausible (or on blur), so partial
+ * years like 0002-01-01 don't round-trip through slow state (e.g. the URL) and reset the field mid-typing. */
+export function DateInput({ value, onChange, onBlur, ...rest }: DateInputProps) {
+  const [draft, setDraft] = useState(value)
+  const [prev, setPrev] = useState(value)
+  if (prev !== value) {
+    setPrev(value)
+    setDraft(value)
+  }
+  return (
+    <input {...rest} type="date" value={draft}
+      onChange={(e) => {
+        const v = e.target.value
+        setDraft(v)
+        if (v === '' || v >= '1900') onChange(v)
+      }}
+      onBlur={(e) => {
+        if (draft !== value) onChange(draft)
+        onBlur?.(e)
+      }} />
   )
 }
 

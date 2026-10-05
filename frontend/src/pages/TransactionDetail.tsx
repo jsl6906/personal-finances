@@ -5,6 +5,7 @@ import {
   del, get, patch, post, upload, type CategoryRule, type Statement, type Transaction, type TxnNote, type TxnPair, type TxnSource,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { AskPanel } from '../components/AskPanel'
 import { MerchantInput } from '../components/MerchantInput'
 import { RuleEditor } from '../components/RuleEditor'
 import { Button, Card, ErrorNote, Field, Icon } from '../components/ui'
@@ -197,7 +198,7 @@ function NotesSection({ txnId }: { txnId: number }) {
             <>
               <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{n.body}</div>
               <div className="row small muted-2" style={{ gap: 8 }}>
-                <span>{n.source === 'import' ? `From ${n.filename ?? 'an import'}` : 'Added by you'} · {shortDate(n.created_at)}</span>
+                <span>{n.source === 'import' ? `From ${n.filename ?? 'an import'}` : n.source === 'question' ? 'Emailed question' : 'Added by you'} · {shortDate(n.created_at)}</span>
                 <button type="button" className="link-btn" onClick={() => setEditing({ id: n.id, body: n.body })}>Edit</button>
                 <button type="button" className="link-btn" disabled={remove.isPending}
                   onClick={() => confirm('Delete this note?') && remove.mutate(n.id)}>Delete</button>
@@ -222,6 +223,8 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
   const tags = useTags()
   const [draft, setDraft] = useState<Draft>(() => toDraft(txn, { account_id: defaultAccountId ?? null }))
   const [rulePrompt, setRulePrompt] = usePrompt(txn?.id)
+  const [asking, setAsking] = useState(false)
+  const [asked, setAsked] = useState<string | null>(null)
   const isNew = txn === null
   const dups = useQuery({
     queryKey: ['duplicates', 'for', txn?.id],
@@ -325,9 +328,26 @@ export function TransactionDetail({ txn, defaultAccountId, standalone = false, o
             </div>
           )}
         </div>
-        {!standalone && <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">×</button>}
+        {!isNew && (
+          <div className="row" style={{ flexWrap: 'nowrap', gap: 4 }}>
+            <Button variant="ghost" className="small" onClick={() => { setAsking(!asking); setAsked(null) }}
+              title="Email a household member a question about this transaction">Ask…</Button>
+            {!standalone && <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">×</button>}
+          </div>
+        )}
+        {isNew && !standalone && <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">×</button>}
       </div>
       {!isNew && !standalone && <div className={`big-amount${amountNum > 0 ? ' pos' : ''}`}>{money(txn.amount, true)}</div>}
+
+      {!isNew && asking && (
+        <AskPanel ids={[txn.id]} onSent={(msg) => { setAsking(false); setAsked(msg) }} onClose={() => setAsking(false)} />
+      )}
+      {asked && (
+        <div className="callout row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+          <span style={{ flex: 1 }}>{asked}</span>
+          <button className="btn btn-ghost btn-icon" onClick={() => setAsked(null)} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       {!isNew && txn.suggested_category_name && !txn.category_id && (
         <div className="callout">

@@ -90,7 +90,7 @@ export interface TxnSource {
   txn_date: string | null; description: string | null; amount: string | null; match_score: string | null; created_at: string
 }
 export interface TxnNote {
-  id: number; body: string; source: 'user' | 'import'; import_batch_id: number | null; attachment_id: number | null
+  id: number; body: string; source: 'user' | 'import' | 'question'; import_batch_id: number | null; attachment_id: number | null
   filename: string | null; created_at: string; updated_at: string
 }
 
@@ -300,7 +300,7 @@ export type AlertKind = 'budget_overspend' | 'out_of_norm' | 'large_transaction'
 export interface AlertRule { kind: AlertKind; enabled: boolean; params: { pace?: boolean; threshold?: number }; updated_at: string }
 export interface AlertRecipient { id: number; email: string; name: string | null; enabled: boolean; created_at: string }
 export interface AlertEvent {
-  id: number; kind: AlertKind; title: string; body: string; link: string | null
+  id: number; kind: AlertKind | 'question'; title: string; body: string; link: string | null
   status: 'pending' | 'sent' | 'failed' | 'skipped'; recipients: string[]; error: string | null
   created_at: string; sent_at: string | null
   /** Current status of the finding an out-of-norm/large-transaction alert was about (null for other alerts or if gone). */
@@ -311,6 +311,8 @@ export interface AlertStatus {
   digest_weekday: string; recipients: number
 }
 export interface DigestPreview { subject: string; title: string; text: string; html: string; summary: string | null }
+/** Someone a question about transactions can be emailed to (household member with an email, or alert recipient). */
+export interface Person { email: string; name: string | null }
 
 // ---- chat ----
 export interface ChatSession { id: number; title: string; created_at: string; updated_at: string }

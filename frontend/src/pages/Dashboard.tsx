@@ -43,7 +43,7 @@ export function Dashboard() {
   const typeRank = (t: string) => { const i = ACCOUNT_TYPES.indexOf(t); return i < 0 ? ACCOUNT_TYPES.length : i }
   const groupedAccounts = [...accountGroups.entries()].sort(([x], [y]) => typeRank(x) - typeRank(y))
   const alertEvents = useQuery({ queryKey: ['alerts', 'events'], queryFn: () => get<AlertEvent[]>('/alerts/events', { limit: 12 }) })
-  const lastSent = alertEvents.data?.find((e) => e.status === 'sent' && e.kind !== 'weekly_digest')
+  const lastSent = alertEvents.data?.find((e) => e.status === 'sent' && e.kind !== 'weekly_digest' && e.kind !== 'question')
   const s = summary.data
   const mon = now.toLocaleString('en-US', { month: 'short' })
 

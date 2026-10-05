@@ -1,13 +1,15 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ledger.alerts.mailer import EMAIL_RE, send_email, smtp_configured
-from ledger.alerts.service import active_recipients, render_digest
+from ledger.alerts import email_html as mail
+from ledger.alerts import questions
+from ledger.alerts.mailer import EMAIL_RE, MailNotConfigured, preview_html, send_email, smtp_configured
+from ledger.alerts.service import active_recipients, footer, render_digest
 from ledger.config import get_settings
 from ledger.db.engine import get_session
 from ledger.jobs.worker import enqueue, notify_worker
@@ -117,10 +119,38 @@ async def send_test(session: AsyncSession = Depends(get_session)):
     if not to:
         raise HTTPException(409, "Add at least one recipient first")
     try:
-        await send_email(to, "Ledger test email", "Email alerts from Ledger are working.\n")
+        body = mail.alert_card("Test", "good", "Email alerts are working", f"Sent to {', '.join(to)}.", None)
+        html_body = mail.layout(kicker="Test", heading="Ledger test email", body=body, footer=footer())
+        await send_email(to, "Ledger test email", "Email alerts from Ledger are working.\n", html_body)
     except Exception as exc:
         raise HTTPException(502, f"Sending failed: {exc}") from None
     return {"sent_to": to}
+
+
+@router.get("/people")
+async def list_people(session: AsyncSession = Depends(get_session)):
+    """Addresses a question can be sent to (household members with an email, plus alert recipients)."""
+    return await questions.people(session)
+
+
+class QuestionIn(BaseModel):
+    transaction_ids: list[int] = Field(min_length=1, max_length=questions.MAX_TRANSACTIONS)
+    to: list[str] = Field(min_length=1, max_length=10)
+    message: str = Field(min_length=1, max_length=4000)
+    subject: str | None = Field(None, max_length=200)
+    reply_to: str | None = Field(None, max_length=254)
+
+
+@router.post("/questions")
+async def ask_question(body: QuestionIn, session: AsyncSession = Depends(get_session)):
+    try:
+        return await questions.ask(session, body.transaction_ids, body.to, body.message, body.subject, body.reply_to)
+    except questions.QuestionError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except MailNotConfigured as exc:
+        raise HTTPException(409, str(exc)) from None
+    except questions.DeliveryError as exc:
+        raise HTTPException(502, str(exc)) from None
 
 
 async def _enqueue(session: AsyncSession, job_type: str, payload: dict) -> JobOut:
@@ -138,7 +168,8 @@ async def run_rules(session: AsyncSession = Depends(get_session)):
 
 @router.get("/digest/preview")
 async def preview_digest(ai: bool = False, session: AsyncSession = Depends(get_session)):
-    return await render_digest(session, date.today(), ai=ai)
+    d = await render_digest(session, date.today(), ai=ai)
+    return {**d, "html": preview_html(d["html"])}
 
 
 @router.post("/digest/send", response_model=JobOut, status_code=202)

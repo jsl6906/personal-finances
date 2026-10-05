@@ -28,6 +28,26 @@ async def test_mailer_builds_safe_message(monkeypatch):
     assert msg.get_body(("html",)).get_content().strip() == "<p>body</p>"
 
 
+async def test_mailer_inlines_logo_and_reply_to(monkeypatch):
+    from ledger.alerts import mailer
+    from ledger.config import Settings
+
+    captured = {}
+
+    async def fake_send(msg, **kwargs):
+        captured["msg"] = msg
+
+    monkeypatch.setattr(mailer, "get_settings", lambda: Settings(smtp_host="smtp.example.com", smtp_from="l@example.com"))
+    monkeypatch.setattr(mailer.aiosmtplib, "send", fake_send)
+    html_body = alerts.mail.layout(kicker="Test", heading="Hi", body="<p>x</p>", preheader="Preview text")
+    await mailer.send_email(["a@example.com"], "Hi", "x", html_body, reply_to="mona@example.com")
+    msg = captured["msg"]
+    assert msg["Reply-To"] == "mona@example.com"
+    [logo] = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert logo["Content-ID"] == "<ledger-logo>" and logo.get_content() == mailer.logo_png()
+    assert "cid:ledger-logo" in msg.get_body(("html",)).get_content()
+
+
 @pytest.fixture
 def outbox(monkeypatch):
     sent: list[dict] = []
@@ -197,3 +217,46 @@ async def test_emails_link_into_the_app(client, outbox, monkeypatch):
     async with get_sessionmaker()() as s:
         d = await alerts.render_digest(s, today + timedelta(days=1), ai=False)
     assert f"{base}/transactions?start=" in d["text"] and f'href="{base}/merchants?key=' in d["html"]
+
+
+async def test_ask_about_transactions(client, monkeypatch):
+    from ledger.alerts import questions
+
+    sent: list[dict] = []
+
+    async def fake_send(to, subject, text, html=None, reply_to=None):
+        sent.append({"to": to, "subject": subject, "text": text, "html": html, "reply_to": reply_to})
+
+    monkeypatch.setattr(questions, "send_email", fake_send)
+    monkeypatch.setattr(questions, "smtp_configured", lambda: True)
+    await client.post("/api/members", json={"name": "TQ Mona", "initials": "TQM", "email": "TQ-Mona@Example.com"})
+    await client.post("/api/alerts/recipients", json={"email": "tq-josh@example.com", "name": "TQ Josh"})
+    people = {p["email"]: p["name"] for p in (await client.get("/api/alerts/people")).json()}
+    assert people["tq-mona@example.com"] == "TQ Mona" and people["tq-josh@example.com"] == "TQ Josh"
+
+    ids = [
+        (await client.post("/api/transactions", json={"txn_date": d, "description": desc, "amount": amt})).json()["id"]
+        for d, desc, amt in (("2031-02-01", "TQ <b>GADGETS</b>", "-42.50"), ("2031-02-03", "TQ REFUNDCO", "12.00"))
+    ]
+    body = {"transaction_ids": ids, "to": ["tq-mona@example.com"], "message": "What were <these>?"}
+    assert (await client.post("/api/alerts/questions", json={**body, "to": ["stranger@example.com"]})).status_code == 422
+    assert (await client.post("/api/alerts/questions", json={**body, "reply_to": "x@example.com"})).status_code == 422
+    assert sent == []
+
+    r = await client.post("/api/alerts/questions", json={**body, "reply_to": "tq-josh@example.com"})
+    assert r.status_code == 200, r.text
+    [mail] = sent
+    assert mail["to"] == ["tq-mona@example.com"] and mail["reply_to"] == "tq-josh@example.com"
+    assert mail["subject"] == "Question about 2 transactions"
+    assert "TQ Josh has a question about 2 transactions" in mail["html"]
+    assert "What were &lt;these&gt;?" in mail["html"] and "TQ &lt;b&gt;GADGETS&lt;/b&gt;" in mail["html"]
+    assert "-$30.50" in mail["html"] and "What were <these>?" in mail["text"]
+
+    notes = (await client.get(f"/api/transactions/{ids[0]}/notes")).json()
+    assert [(n["source"], n["body"]) for n in notes] == [("question", "Asked TQ Mona: What were <these>?")]
+    event = next(e for e in (await client.get("/api/alerts/events")).json() if e["id"] == r.json()["event_id"])
+    assert event["kind"] == "question" and event["status"] == "sent" and event["recipients"] == ["tq-mona@example.com"]
+
+    one = await client.post("/api/alerts/questions", json={**body, "transaction_ids": ids[:1], "message": "Hm?"})
+    assert sent[-1]["subject"] == "Question: TQ <b>GADGETS</b> -$42.50" and sent[-1]["reply_to"] is None
+    assert one.json()["sent_to"] == ["tq-mona@example.com"]

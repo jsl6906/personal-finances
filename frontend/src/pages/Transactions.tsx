@@ -3,7 +3,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, useNavigate } from 'react-router-dom'
 import { get, post, type Job, type Transaction, type TransactionPage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
-import { Button, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
+import { AskPanel } from '../components/AskPanel'
+import { Button, DateInput, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
 import { fullDate, money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
 import { useAccounts, useJob } from '../hooks'
 import { accountPath, categoryPath } from '../links'
@@ -42,6 +43,7 @@ export function Transactions() {
   const [bulkCategory, setBulkCategory] = useState<number | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
   const [bulkPrompt, setBulkPrompt] = useState<{ txn: Transaction; categoryId: number } | { done: string } | null>(null)
+  const [asking, setAsking] = useState(false)
 
   const range = period === 'custom'
     ? { start: dateStart || undefined, end: dateEnd || undefined }
@@ -155,10 +157,10 @@ export function Transactions() {
           {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         {period === 'custom' && <>
-          <input className="input compact" type="date" aria-label="Start date" value={dateStart}
-            max={dateEnd || undefined} onChange={(e) => filter({ start: e.target.value, period: 'custom' })} />
-          <input className="input compact" type="date" aria-label="End date" value={dateEnd}
-            min={dateStart || undefined} onChange={(e) => filter({ end: e.target.value, period: 'custom' })} />
+          <DateInput className="input compact" aria-label="Start date" value={dateStart}
+            max={dateEnd || undefined} onChange={(v) => filter({ start: v, period: 'custom' })} />
+          <DateInput className="input compact" aria-label="End date" value={dateEnd}
+            min={dateStart || undefined} onChange={(v) => filter({ end: v, period: 'custom' })} />
         </>}
         <select className="input compact" value={accountId ?? ''}
           onChange={(e) => filter({ account: e.target.value || null })}>
@@ -205,6 +207,10 @@ export function Transactions() {
           <Button onClick={() => bulkCategory && bulkCategorize(bulkCategory)} disabled={!bulkCategory || bulk.isPending}>Apply</Button>
           <Button onClick={() => acceptSel.mutate([...checked])} disabled={acceptSel.isPending}>Accept suggestions</Button>
           <Button variant="ghost" onClick={() => rejectSel.mutate([...checked])}>Reject suggestions</Button>
+          <Button onClick={() => { setAsking(!asking); setBulkPrompt(null) }} disabled={checked.size > 100}
+            title={checked.size > 100 ? 'Select at most 100 transactions' : 'Email a household member a question about these'}>
+            Ask about {checked.size === 1 ? 'this' : 'these'}…
+          </Button>
           <span className="spacer" />
           <Button variant="ghost" onClick={() => confirm(`Delete ${checked.size} transactions?`) && bulk.mutate({ delete: true })}>
             Delete
@@ -216,6 +222,10 @@ export function Transactions() {
           {suggestedIds.length} suggestions on this page
           <Button onClick={() => acceptSel.mutate(suggestedIds)} disabled={acceptSel.isPending}>Accept all on page</Button>
         </div>
+      )}
+      {asking && checked.size > 0 && (
+        <AskPanel ids={[...checked]} onClose={() => setAsking(false)}
+          onSent={(msg) => { setAsking(false); setBulkPrompt({ done: msg }) }} />
       )}
       {bulkPrompt && 'txn' in bulkPrompt && (
         <RulePrompt key={`${bulkPrompt.txn.id}-${bulkPrompt.categoryId}`} txn={bulkPrompt.txn} categoryId={bulkPrompt.categoryId}

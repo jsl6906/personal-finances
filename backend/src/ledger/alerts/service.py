@@ -4,7 +4,6 @@ Each condition becomes an AlertEvent with a stable subject_key, so it is emailed
 evaluation run are batched into a single email.
 """
 
-import html
 import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -15,6 +14,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ledger.alerts import email_html as mail
 from ledger.alerts.mailer import send_email, smtp_configured
 from ledger.analytics.reports import EXPENSE, FROM, INCOME, REPORTABLE, category_breakdown, top_merchants
 from ledger.budgets.service import budget_status, period_for
@@ -170,32 +170,40 @@ def _url(link: str | None) -> str | None:
     return f"{base.rstrip('/')}{link}" if base and link else None
 
 
+def _notice(e: AlertEvent) -> tuple[str, str, str]:
+    """(badge label, tone, title without its "Kind · " prefix) for an alert event."""
+    prefix, _, rest = e.title.partition(" · ")
+    title = rest or e.title
+    if e.kind == "budget_overspend":
+        pace = e.subject_key.endswith(":pace")
+        return ("On pace to overspend", "pace", title) if pace else ("Over budget", "over", title)
+    if e.kind == "large_transaction":
+        return "Large transaction", "pace", title
+    return (prefix if rest else "Out of norm"), "info", title
+
+
+def _preview(parts: list[str]) -> str:
+    s = " · ".join(parts)
+    return s if len(s) <= 140 else s[:139] + "…"
+
+
+def footer(extra: str = "") -> str:
+    alerts_page = mail.link("Alerts page", _url("/alerts"), mail.MUTED)
+    return f"{extra}Sent by Ledger. Manage rules and recipients on the {alerts_page}."
+
+
 def render_alerts(events: list[AlertEvent]) -> tuple[str, str]:
-    lines, items = [], []
+    lines, cards, titles = [], [], []
     for e in events:
         url = _url(e.link)
+        label, tone, title = _notice(e)
+        titles.append(title)
         lines.append(f"* {e.title}\n  {e.body.replace(chr(10), chr(10) + '  ')}" + (f"\n  {url}" if url else ""))
-        title = _a(e.title, url)
-        body = html.escape(e.body).replace("\n", "<br>")
-        items.append(
-            f'<li style="margin-bottom:12px"><strong>{title}</strong><br><span style="color:#444">{body}</span></li>'
-        )
-    return "\n\n".join(lines) + "\n", _wrap("New alerts", f'<ul style="padding-left:18px">{"".join(items)}</ul>')
-
-
-def _a(text: str, url: str | None, style: str = "color:#1f3d2b") -> str:
-    text = html.escape(text)
-    return f'<a href="{html.escape(url)}" style="{style}">{text}</a>' if url else text
-
-
-def _wrap(heading: str, inner: str) -> str:
-    alerts_page = _a("Alerts page", _url("/alerts"), "color:#888")
-    return (
-        '<div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;color:#1c1c1c;max-width:640px">'
-        f'<h2 style="font-weight:600;margin:0 0 12px">{html.escape(heading)}</h2>{inner}'
-        '<p style="color:#888;font-size:12px;margin-top:24px">Sent by Ledger. Manage rules and recipients on the '
-        f"{alerts_page}.</p></div>"
-    )
+        cards.append(mail.alert_card(label, tone, title, e.body, url))
+    heading = "New alert" if len(events) == 1 else f"{len(events)} new alerts"
+    body = "".join(cards) + mail.button("Open Ledger", _url("/"))
+    html_body = mail.layout(kicker="Alert", heading=heading, body=body, preheader=_preview(titles), footer=footer())
+    return "\n\n".join(lines) + "\n", html_body
 
 
 async def active_recipients(session: AsyncSession) -> list[str]:
@@ -397,20 +405,28 @@ async def render_digest(session: AsyncSession, today: date, ai: bool = True) -> 
     url = _url("/")
     if url:
         text_body += f"\n\nOpen Ledger: {url}"
-    inner = (f'<p style="font-size:15px">{html.escape(summary)}</p>' if summary else "") + "".join(
-        f'<h3 style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#555;margin:18px 0 6px">'
-        f'{html.escape(h)}</h3><ul style="padding-left:18px;margin:0">'
-        + "".join(f"<li>{_a(line, _url(link))}</li>" for line, link in lines)
-        + "</ul>"
-        for h, lines in sections
+    tone = "good" if diff <= 0 else "over" if diff > d["weekly_avg"] * 0.25 else "info"
+    kpis = mail.stats(
+        [
+            ("Spent", money(d["spent"]), _n(d["count"], "transaction")),
+            ("Typical week", money(d["weekly_avg"]), f"{money(abs(diff))} {'above' if diff >= 0 else 'below'}"),
+            ("Income", money(d["income"]), None),
+        ]
     )
-    if url:
-        inner += f'<p><a href="{html.escape(url)}">Open Ledger</a></p>'
+    week_url = _url(txns_link(**week))
+    inner = (mail.card(mail.multiline(summary), tone) if summary else "") + kpis
+    if week_url:
+        inner += f'<div style="font-size:13px">{mail.link("See this week’s transactions →", week_url)}</div>'
+    inner += "".join(mail.section(h, [(line, _url(link)) for line, link in lines]) for h, lines in sections[1:])
+    inner += mail.button("Open Ledger", url)
+    preheader = summary or f"Spent {money(d['spent'])} across {_n(d['count'], 'transaction')}."
     return {
         "subject": f"Ledger weekly digest · {label}",
         "title": f"Weekly digest · {label}",
         "text": text_body + "\n",
-        "html": _wrap(f"Weekly digest · {label}", inner),
+        "html": mail.layout(
+            kicker="Weekly digest", heading=label, body=inner, preheader=_preview([preheader]), footer=footer()
+        ),
         "summary": summary,
     }
 
