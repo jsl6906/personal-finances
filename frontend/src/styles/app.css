@@ -89,6 +89,25 @@ a:hover { color: var(--color-accent-900); }
 .table-foot { display: flex; justify-content: space-between; align-items: center; padding: var(--space-2) var(--space-3);
   font-size: 12px; }
 
+/* Dense hierarchy editor (Settings): parent rows with indented children. */
+.table.dense { font-size: 13px; }
+.table.dense th { padding: 4px var(--space-2); }
+.table.dense td { padding: 2px var(--space-2); line-height: 1.3; }
+.table.dense .btn { padding-block: 2px; font-size: 12px; }
+.table.dense .tag { padding: 1px 6px; font-size: 10px; }
+.table.dense td.num { text-align: left; }
+.tree-parent td { background: color-mix(in srgb, var(--color-text) 5%, transparent); border-top: 1px solid var(--color-divider); }
+.tree-parent .tree-name { font-weight: 600; font-size: 14px; }
+.tree-toggle { width: 16px; text-align: center; color: var(--color-neutral-700); font-size: 11px; }
+.tree-child { padding-left: calc(var(--space-2) + 24px) !important; white-space: nowrap; }
+.tree-dim td { color: var(--color-neutral-600); }
+.tree-dim td a { color: inherit; }
+.tree-form { gap: var(--space-2) var(--space-3); align-items: flex-end; padding: var(--space-1) 0; }
+.tree-form .field { min-width: 140px; flex: 1 1 140px; }
+.tree-form .field > label { margin-bottom: 2px; }
+.tree-form .input { min-height: 30px; padding: 3px 8px; }
+.tree-form .field:has(input[type='checkbox']) { flex: 0 0 auto; min-width: 0; }
+
 .tx-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .tx-layout.with-detail { grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); }
 .detail { padding: 0; position: sticky; top: var(--space-6); max-height: calc(100vh - 2 * var(--space-6)); min-width: 0; }

@@ -25,7 +25,7 @@ type Props = {
   display?: (row: Row, key: string) => string | undefined
 }
 
-function Editor({ col, value, onChange }: { col: Column; value: unknown; onChange: (v: unknown) => void }) {
+export function Editor({ col, value, onChange }: { col: Column; value: unknown; onChange: (v: unknown) => void }) {
   if (col.kind === 'bool') {
     return <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
   }
