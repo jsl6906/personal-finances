@@ -135,7 +135,7 @@ function MerchantView({ merchant: key }: { merchant: string }) {
           {d.descriptions.map((x) => (
             <div key={x.description} className="row small" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
               <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{x.description}</span>
-              <span className="text-muted nowrap">{x.count} · last {shortDate(x.last_date)} {x.last_date.slice(2, 4)}</span>
+              <span className="text-muted nowrap">{x.count} · last {shortDate(x.last_date)}</span>
             </div>
           ))}
           <div className="card-meta">Most common raw descriptions grouped under this merchant.</div>

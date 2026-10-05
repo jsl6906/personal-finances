@@ -316,7 +316,7 @@ function Member({ m }: { m: ReviewMember }) {
       <Link to={merchantPath(m.key)}>{m.name}</Link>
       <span className="muted-2">
         {' '}· {m.count.toLocaleString()} txn{m.count === 1 ? '' : 's'}
-        {m.last_date && ` · last ${shortDate(m.last_date)} ${m.last_date.slice(2, 4)}`}
+        {m.last_date && ` · last ${shortDate(m.last_date)}`}
         {m.sample && <> · <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{m.sample}</span></>}
       </span>
     </span>

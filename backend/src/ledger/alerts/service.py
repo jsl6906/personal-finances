@@ -8,6 +8,7 @@ import html
 import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from urllib.parse import quote, urlencode
 
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
@@ -47,6 +48,32 @@ async def large_txn_threshold(session: AsyncSession) -> Decimal:
     return Decimal(str(value if value else get_settings().large_txn_threshold))
 
 
+def txns_link(**params) -> str:
+    """App path of the Transactions page filtered like links.ts txnsPath."""
+    return "/transactions?" + urlencode({k: str(v) for k, v in params.items() if v not in (None, "")})
+
+
+def budget_link(row: dict, period) -> str:
+    if not row["category_ids"]:
+        return "/budgets"
+    if row["category_id"]:
+        target = {"category": row["category_id"]}
+    else:
+        target = {"categories": ",".join(map(str, row["category_ids"])), "label": f"{row['name']} · {period.label}"}
+    return txns_link(**target, start=period.start, end=period.end)
+
+
+def anomaly_link(a: Anomaly) -> str:
+    if a.transaction_id:
+        return f"/transactions/{a.transaction_id}"
+    if a.series_id:
+        return f"/bills?series={a.series_id}"
+    if a.category_id:
+        month = period_for("month", a.period)
+        return txns_link(category=a.category_id, start=month.start, end=month.end)
+    return f"/findings?kind={a.kind}"
+
+
 async def _budget_candidates(session: AsyncSession, rule: AlertRule, today: date) -> list[dict]:
     out = []
     kinds = set((await session.scalars(select(Budget.period_type).distinct())).all())
@@ -66,7 +93,7 @@ async def _budget_candidates(session: AsyncSession, rule: AlertRule, today: date
                         "title": f"Budget · {r['name']} {r['pct']:.0f}% of {period.label}",
                         "body": f"{r['name']} has reached {money(r['actual'])} against a {money(r['budget'])} budget "
                         f"for {period.label} ({money(-r['left'])} over).",
-                        "link": "/budgets",
+                        "link": budget_link(r, period),
                     }
                 )
             elif (
@@ -82,7 +109,7 @@ async def _budget_candidates(session: AsyncSession, rule: AlertRule, today: date
                         "body": f"{r['name']} is at {money(r['actual'])} of {money(r['budget'])} with "
                         f"{(1 - elapsed) * 100:.0f}% of {period.label} left; at this rate it ends near "
                         f"{money(r['projected'])}.",
-                        "link": "/budgets",
+                        "link": budget_link(r, period),
                     }
                 )
     return out
@@ -103,7 +130,7 @@ async def _anomaly_candidates(session: AsyncSession, kinds: tuple[str, ...], rul
             "subject_key": f"anomaly:{a.id}",
             "title": f"{ANOMALY_LABELS.get(a.kind, 'Out-of-norm')} · {a.title} {money(a.amount)}",
             "body": a.detail + (f"\n{a.ai_note}" if a.ai_note else ""),
-            "link": f"/transactions/{a.transaction_id}" if a.transaction_id else "/findings",
+            "link": anomaly_link(a),
         }
         for a in rows
     ]
@@ -148,9 +175,7 @@ def render_alerts(events: list[AlertEvent]) -> tuple[str, str]:
     for e in events:
         url = _url(e.link)
         lines.append(f"* {e.title}\n  {e.body.replace(chr(10), chr(10) + '  ')}" + (f"\n  {url}" if url else ""))
-        title = html.escape(e.title)
-        if url:
-            title = f'<a href="{html.escape(url)}" style="color:#1f3d2b">{title}</a>'
+        title = _a(e.title, url)
         body = html.escape(e.body).replace("\n", "<br>")
         items.append(
             f'<li style="margin-bottom:12px"><strong>{title}</strong><br><span style="color:#444">{body}</span></li>'
@@ -158,12 +183,18 @@ def render_alerts(events: list[AlertEvent]) -> tuple[str, str]:
     return "\n\n".join(lines) + "\n", _wrap("New alerts", f'<ul style="padding-left:18px">{"".join(items)}</ul>')
 
 
+def _a(text: str, url: str | None, style: str = "color:#1f3d2b") -> str:
+    text = html.escape(text)
+    return f'<a href="{html.escape(url)}" style="{style}">{text}</a>' if url else text
+
+
 def _wrap(heading: str, inner: str) -> str:
+    alerts_page = _a("Alerts page", _url("/alerts"), "color:#888")
     return (
         '<div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;color:#1c1c1c;max-width:640px">'
         f'<h2 style="font-weight:600;margin:0 0 12px">{html.escape(heading)}</h2>{inner}'
-        '<p style="color:#888;font-size:12px;margin-top:24px">Sent by Ledger. Manage rules and recipients on the Alerts '
-        "page.</p></div>"
+        '<p style="color:#888;font-size:12px;margin-top:24px">Sent by Ledger. Manage rules and recipients on the '
+        f"{alerts_page}.</p></div>"
     )
 
 
@@ -212,7 +243,8 @@ async def digest_data(session: AsyncSession, today: date) -> dict:
         """
     )
     totals = (await session.execute(sql, {"start": start, "end": end, "base_start": base_start})).one()
-    month = await budget_status(session, period_for("month", today), today)
+    month_period = period_for("month", today)
+    month = await budget_status(session, month_period, today)
     watch = [r for r in month["rows"] if r["kind"] == "expense" and r["status"] in ("over", "pace")]
     open_anomalies = (
         await session.scalars(select(Anomaly).where(Anomaly.status == "open").order_by(Anomaly.created_at.desc()).limit(3))
@@ -226,6 +258,7 @@ async def digest_data(session: AsyncSession, today: date) -> dict:
         "count": totals.n or 0,
         "categories": [c for c in await category_breakdown(session, start, end) if c["spent"] > 0][:5],
         "merchants": await top_merchants(session, start, end, limit=5),
+        "budget_period": month_period,
         "budget_label": month["period"]["label"],
         "budget_total": month["total"],
         "budget_watch": watch[:6],
@@ -285,43 +318,81 @@ async def render_digest(session: AsyncSession, today: date, ai: bool = True) -> 
     label = f"{d['start']:%d %b} – {d['end']:%d %b %Y}"
     summary = await _ai_summary(d) if ai else None
     diff = d["spent"] - d["weekly_avg"]
-    sections: list[tuple[str, list[str]]] = [
+    week = {"start": d["start"], "end": d["end"]}
+    sections: list[tuple[str, list[tuple[str, str | None]]]] = [
         (
             "The week",
             [
-                f"Spent {money(d['spent'])} across {d['count']} transactions; income {money(d['income'])}.",
-                f"Typical week (last 8): {money(d['weekly_avg'])} — this week was {money(abs(diff))} "
-                f"{'above' if diff >= 0 else 'below'}.",
+                (
+                    f"Spent {money(d['spent'])} across {d['count']} transactions; income {money(d['income'])}.",
+                    txns_link(**week),
+                ),
+                (
+                    f"Typical week (last 8): {money(d['weekly_avg'])} — this week was {money(abs(diff))} "
+                    f"{'above' if diff >= 0 else 'below'}.",
+                    None,
+                ),
             ],
         ),
-        ("Top categories", [f"{c['category']}: {money(c['spent'])}" for c in d["categories"]] or ["No spending recorded."]),
-        ("Top merchants", [f"{m['example']}: {money(m['spent'])} ({m['count']})" for m in d["merchants"]] or ["—"]),
+        (
+            "Top categories",
+            [
+                (
+                    f"{c['category']}: {money(c['spent'])}",
+                    txns_link(category=c["category_id"], **week)
+                    if c["category_id"]
+                    else txns_link(status="uncategorized", **week),
+                )
+                for c in d["categories"]
+            ]
+            or [("No spending recorded.", None)],
+        ),
+        (
+            "Top merchants",
+            [
+                (f"{m['example']}: {money(m['spent'])} ({m['count']})", f"/merchants?key={quote(m['merchant'], safe='')}")
+                for m in d["merchants"]
+            ]
+            or [("—", None)],
+        ),
     ]
     bt = d["budget_total"]
-    budget_lines = [f"{money(bt['spent'])} of {money(bt['budget'])} budgeted so far."] if bt["count"] else []
+    budget_lines = [(f"{money(bt['spent'])} of {money(bt['budget'])} budgeted so far.", "/budgets")] if bt["count"] else []
     budget_lines += [
-        f"{r['name']}: {money(r['actual'])} of {money(r['budget'])}"
-        + (" — over" if r["status"] == "over" else f" — on pace for {money(r['projected'])}")
+        (
+            f"{r['name']}: {money(r['actual'])} of {money(r['budget'])}"
+            + (" — over" if r["status"] == "over" else f" — on pace for {money(r['projected'])}"),
+            budget_link(r, d["budget_period"]),
+        )
         for r in d["budget_watch"]
     ]
     if budget_lines:
         sections.append((f"Budgets · {d['budget_label']}", budget_lines))
     todo = []
     if d["anomaly_count"]:
-        todo.append(_n(d["anomaly_count"], "out-of-norm finding") + " open")
+        todo.append((_n(d["anomaly_count"], "out-of-norm finding") + " open", "/findings"))
     if d["statements_to_review"]:
-        todo.append(_n(d["statements_to_review"], "statement") + " awaiting review")
+        todo.append((_n(d["statements_to_review"], "statement") + " awaiting review", "/bills"))
     if d["new_statements"]:
-        todo.append(_n(d["new_statements"], "new statement") + " this week")
+        todo.append((_n(d["new_statements"], "new statement") + " this week", "/bills"))
     if d["uncategorized"]:
-        todo.append(_n(d["uncategorized"], "uncategorized transaction") + " (last 30 days)")
+        todo.append(
+            (
+                _n(d["uncategorized"], "uncategorized transaction") + " (last 30 days)",
+                txns_link(status="uncategorized", start=today - timedelta(days=30), end=today),
+            )
+        )
     if d["duplicates"]:
-        todo.append(_n(d["duplicates"], "possible duplicate") + " to review")
+        todo.append((_n(d["duplicates"], "possible duplicate") + " to review", "/duplicates"))
     if todo:
         sections.append(("To review", todo))
 
+    def text_line(line: str, link: str | None) -> str:
+        url = _url(link)
+        return f"- {line}" + (f"\n  {url}" if url else "")
+
     text_body = (f"{summary}\n\n" if summary else "") + "\n\n".join(
-        f"{h}\n" + "\n".join(f"- {line}" for line in lines) for h, lines in sections
+        f"{h}\n" + "\n".join(text_line(*item) for item in lines) for h, lines in sections
     )
     url = _url("/")
     if url:
@@ -329,7 +400,7 @@ async def render_digest(session: AsyncSession, today: date, ai: bool = True) -> 
     inner = (f'<p style="font-size:15px">{html.escape(summary)}</p>' if summary else "") + "".join(
         f'<h3 style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#555;margin:18px 0 6px">'
         f'{html.escape(h)}</h3><ul style="padding-left:18px;margin:0">'
-        + "".join(f"<li>{html.escape(line)}</li>" for line in lines)
+        + "".join(f"<li>{_a(line, _url(link))}</li>" for line, link in lines)
         + "</ul>"
         for h, lines in sections
     )

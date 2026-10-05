@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -154,3 +154,46 @@ async def test_weekly_digest(client, outbox):
         again = await alerts.send_digest(s, date(2031, 3, 5))
     assert first["status"] == "sent" and again["status"] == "already_sent"
     assert outbox[-1]["subject"].startswith("Ledger weekly digest")
+
+
+async def test_emails_link_into_the_app(client, outbox, monkeypatch):
+    settings = alerts.get_settings().model_copy(update={"app_base_url": "http://mediaserver:8470/"})
+    monkeypatch.setattr(alerts, "get_settings", lambda: settings)
+    base = "http://mediaserver:8470"
+    g = (await client.post("/api/category-groups", json={"name": "TAL Link Group"})).json()
+    cat = (await client.post("/api/categories", json={"name": "TAL Linked", "group_id": g["id"]})).json()
+    await client.post("/api/budgets", json={"category_id": cat["id"], "period_type": "month", "amount": "50"})
+    today = date.today()
+    await client.post(
+        "/api/transactions",
+        json={"txn_date": today.isoformat(), "description": "TAL LINKSHOP", "amount": "-90.00", "category_id": cat["id"]},
+    )
+    async with get_sessionmaker()() as s:
+        s.add(
+            Anomaly(
+                kind="category_spike",
+                subject_key="test:tal-link-spike",
+                period=today.replace(day=1),
+                category_id=cat["id"],
+                amount=90,
+                baseline=10,
+                score=5,
+                title="TAL Link Spike",
+                detail="Spike.",
+            )
+        )
+        await s.commit()
+        await alerts.evaluate(s, today)
+
+    month = alerts.period_for("month", today)
+    spike_url = f"{base}/transactions?category={cat['id']}&start={month.start}&end={month.end}"
+    [budget_event] = await _events("TAL Linked")
+    assert budget_event.link == f"/transactions?category={cat['id']}&start={month.start}&end={month.end}"
+    sent = next(m for m in outbox if "TAL Link Spike" in m["text"])
+    assert spike_url in sent["text"]
+    assert f'href="{spike_url.replace("&", "&amp;")}"' in sent["html"]
+    assert f'href="{base}/alerts"' in sent["html"]
+
+    async with get_sessionmaker()() as s:
+        d = await alerts.render_digest(s, today + timedelta(days=1), ai=False)
+    assert f"{base}/transactions?start=" in d["text"] and f'href="{base}/merchants?key=' in d["html"]

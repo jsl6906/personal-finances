@@ -29,7 +29,7 @@ export function MerchantPicker({ exclude, onPick }: { exclude?: string; onPick: 
         <button key={m.key} type="button" className="btn btn-ghost" style={{ justifyContent: 'space-between', display: 'flex' }}
           onClick={() => onPick(m)}>
           <span>{m.name} <span className="text-muted small">· {m.key}</span></span>
-          <span className="text-muted small">{m.count} · last {shortDate(m.last_date)} {m.last_date.slice(2, 4)}</span>
+          <span className="text-muted small">{m.count} · last {shortDate(m.last_date)}</span>
         </button>
       ))}
       {q.trim().length >= 2 && hits.isSuccess && rows.length === 0 && <div className="small text-muted">No other merchants match.</div>}

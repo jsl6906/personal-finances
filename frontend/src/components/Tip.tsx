@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { useQuery } from '@tanstack/react-query'
 import { useLocation } from 'react-router-dom'
 import { get, type ContribParams, type Contributors } from '../api'
-import { money, shortDate } from '../format'
+import { fullDate, money, shortDate } from '../format'
 import { TipContext, type TipApi, type TipSpec } from '../tip'
 
 type TipState = { spec: TipSpec; x: number; y: number; path: string }
@@ -96,7 +96,7 @@ function Contrib({ params, show }: { params: ContribParams; show: 'merchants' | 
           <tbody>
             {d.transactions.map((x) => (
               <tr key={x.id}>
-                <td className="nowrap muted-2">{shortDate(x.date)} {x.date.slice(2, 4)}</td>
+                <td className="nowrap muted-2" title={fullDate(x.date)}>{shortDate(x.date)}</td>
                 <td className="tip-name">{x.description}</td><td className="num">{money(x.amount)}</td>
               </tr>
             ))}

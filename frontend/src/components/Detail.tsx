@@ -5,7 +5,7 @@ import {
   del, get, post, put, type Anomaly, type BreakdownRow, type BudgetInfo, type EntityYear, type PeriodType, type TransactionPage,
 } from '../api'
 import { TXN_SORT, type DetailRange } from '../detail'
-import { iso, money, monthLabel, parseIso, shortDate } from '../format'
+import { fullDate, iso, money, monthLabel, parseIso, shortDate } from '../format'
 import { accountPath, categoryPath, txnPath } from '../links'
 import { numParam, sortRows, useUrl, useUrlSort } from '../urlState'
 import { AnomalyList } from './AnomalyList'
@@ -225,7 +225,7 @@ export function TxnList({ params, month, onClearMonth, hide = [], highlightId, t
         <tbody>
           {items.map((t) => (
             <tr key={t.id} className={t.id === highlightId ? 'selected' : undefined}>
-              <td className="nowrap muted-2">{shortDate(t.txn_date)} {t.txn_date.slice(2, 4)}</td>
+              <td className="nowrap muted-2" title={fullDate(t.txn_date)}>{shortDate(t.txn_date)}</td>
               <td style={{ fontWeight: 500 }}><Link to={txnPath(t.id)}>{t.description}</Link></td>
               {!hide.includes('category') && (
                 <td>

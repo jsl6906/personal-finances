@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { get, post, type Job, type Transaction, type TransactionPage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { Button, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
-import { money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
+import { fullDate, money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
 import { useAccounts, useJob } from '../hooks'
 import { accountPath, categoryPath } from '../links'
 import { TXN_SORT } from '../detail'
@@ -260,7 +260,7 @@ export function Transactions() {
                   <td className="check" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={checked.has(t.id)} onChange={() => toggle(t.id)} />
                   </td>
-                  <td className="nowrap muted-2">{shortDate(t.txn_date)}</td>
+                  <td className="nowrap muted-2" title={fullDate(t.txn_date)}>{shortDate(t.txn_date)}</td>
                   <td style={{ fontWeight: 500 }}>{t.description}</td>
                   <td>
                     {t.category_name ? (

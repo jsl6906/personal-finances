@@ -130,7 +130,7 @@ export function Dashboard() {
             <tbody>
               {(recent.data?.items ?? []).map((t) => (
                 <tr key={t.id}>
-                  <td className="nowrap muted-2">{shortDate(t.txn_date)}</td>
+                  <td className="nowrap muted-2" title={fullDate(t.txn_date)}>{shortDate(t.txn_date)}</td>
                   <td><Link to={txnPath(t.id)}>{t.description}</Link></td>
                   <td className="hide-sm">
                     {t.category_id

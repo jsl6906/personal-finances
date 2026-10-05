@@ -26,7 +26,8 @@ export function parseIso(s: string): Date {
 export function shortDate(s: string | null): string {
   if (!s) return '—'
   const d = parseIso(s.slice(0, 10))
-  return `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]}`
+  const year = d.getFullYear() === new Date().getFullYear() ? '' : ` '${String(d.getFullYear()).slice(2)}`
+  return `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]}${year}`
 }
 
 export function fullDate(s: string | null): string {
