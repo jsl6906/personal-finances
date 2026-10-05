@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { del, post, put } from '../api'
 import { sortRows, useUrlSort, type Dir } from '../urlState'
-import { Button, Card, ErrorNote, SortTh, Swatch } from './ui'
+import { Button, ErrorNote, SortTh, Swatch, TableCard } from './ui'
 
 export type Column = {
   key: string
@@ -121,7 +121,7 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
   )
 
   return (
-    <Card className="table-card" style={{ overflow: 'visible' }}>
+    <TableCard head={<>
       <div className="row" style={{ justifyContent: 'space-between', padding: 'var(--space-3) var(--space-3) 0' }}>
         <div>
           <div className="card-kicker">{kicker}</div>
@@ -130,7 +130,7 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
         <Button onClick={() => startEdit(null)} disabled={editId === 'new'}>Add</Button>
       </div>
       <div style={{ padding: '0 var(--space-3)' }}><ErrorNote error={save.error || remove.error || query.error} /></div>
-      <div style={{ overflowX: 'auto' }}>
+    </>}>
       <table className="table">
         <thead>
           <tr>{columns.map((c) => <SortTh key={c.key} s={sort} k={c.key} style={c.width ? { width: c.width } : undefined}>{c.label}</SortTh>)}<th /></tr>
@@ -152,7 +152,6 @@ export function CrudTable({ title, kicker, path, queryKey, query, columns, defau
           )}
         </tbody>
       </table>
-      </div>
-    </Card>
+    </TableCard>
   )
 }

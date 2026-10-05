@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { del, get, post, upload, type Series, type SeriesPoint, type Statement, type Usage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { LineChart } from '../components/LineChart'
-import { Button, Card, ErrorNote, Field, SortTh } from '../components/ui'
+import { Button, Card, ErrorNote, Field, SortTh, TableCard } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { categoryPath, txnPath } from '../links'
 import { sortRows, useUrlSort } from '../urlState'
@@ -248,7 +248,7 @@ function SeriesView({ id, series }: { id: number; series?: Series }) {
           title: `${periodLabel(p)}: ${fmtUsage(p.usage_value, p.usage_unit)} · ${money(p.amount_due)}`,
         }))} format={(v) => fmtUsage(v, unit)} />
       </Card>
-      <Card className="table-card">
+      <TableCard>
         <table className="table">
           <thead>
             <tr><SortTh s={sort} k="statement">Statement</SortTh><SortTh s={sort} k="period">Period</SortTh>
@@ -277,7 +277,7 @@ function SeriesView({ id, series }: { id: number; series?: Series }) {
             {pts.length === 0 && !hist.isLoading && <tr><td colSpan={6} className="text-muted">No approved statements yet.</td></tr>}
           </tbody>
         </table>
-      </Card>
+      </TableCard>
     </>
   )
 }

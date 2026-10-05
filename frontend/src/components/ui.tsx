@@ -23,6 +23,17 @@ export function Card({ children, className = '', style, as: Tag = 'div' }: CardP
   )
 }
 
+/** Full-bleed table card; the scroll wrapper sits inside so the blueprint corners (at -6px) don't trigger scrollbars. */
+export function TableCard({ children, head, foot }: { children: ReactNode; head?: ReactNode; foot?: ReactNode }) {
+  return (
+    <Card className="table-card">
+      {head}
+      <div className="table-scroll">{children}</div>
+      {foot}
+    </Card>
+  )
+}
+
 export function Swatch({ color }: { color: string }) {
   return <span className="swatch" style={{ background: color }} />
 }

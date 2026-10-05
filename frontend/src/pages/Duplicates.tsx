@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { get, post, type Job, type TxnBrief, type TxnPair } from '../api'
-import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from '../components/ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
 import { money, shortDate } from '../format'
 import { useJob } from '../hooks'
 import { txnPath } from '../links'
@@ -152,7 +152,7 @@ export function Duplicates() {
             </div>
           )}
 
-          <Card className="table-card">
+          <TableCard>
             <table className="table" style={{ fontSize: 13 }}>
               <thead>
                 <tr>
@@ -198,7 +198,7 @@ export function Duplicates() {
                 {!shown.length && <tr><td colSpan={5} className="text-muted">Nothing in this view.</td></tr>}
               </tbody>
             </table>
-          </Card>
+          </TableCard>
         </div>
       )}
     </section>

@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, useNavigate } from 'react-router-dom'
 import { get, post, type Job, type Transaction, type TransactionPage } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
-import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from '../components/ui'
+import { Button, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
 import { money, PERIODS, periodRange, shortDate, type PeriodKey } from '../format'
 import { useAccounts, useJob } from '../hooks'
 import { accountPath, categoryPath } from '../links'
@@ -230,7 +230,15 @@ export function Transactions() {
       <ErrorNote error={list.error || suggest.error || bulk.error || acceptSel.error || rejectSel.error || scan.error} />
 
       <div className={`tx-layout${selected !== null ? ' with-detail' : ''}`}>
-        <Card className="table-card">
+        <TableCard foot={total > PAGE && (
+          <div className="table-foot">
+            <span className="text-muted">{offset + 1}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()}</span>
+            <div className="row">
+              <Button variant="ghost" disabled={page === 1} onClick={() => set({ page: page > 2 ? page - 1 : null })}>Previous</Button>
+              <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => set({ page: page + 1 })}>Next</Button>
+            </div>
+          </div>
+        )}>
           <table className="table">
             <thead>
               <tr>
@@ -283,16 +291,7 @@ export function Transactions() {
               )}
             </tbody>
           </table>
-          {total > PAGE && (
-            <div className="table-foot">
-              <span className="text-muted">{offset + 1}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()}</span>
-              <div className="row">
-                <Button variant="ghost" disabled={page === 1} onClick={() => set({ page: page > 2 ? page - 1 : null })}>Previous</Button>
-                <Button variant="ghost" disabled={offset + PAGE >= total} onClick={() => set({ page: page + 1 })}>Next</Button>
-              </div>
-            </div>
-          )}
-        </Card>
+        </TableCard>
         {selected === 'new' && (
           <TransactionDetail key={`new-${accountId}`} txn={null} defaultAccountId={accountId} onClose={() => select(null)}
             onSaved={(t) => select(t.id, true)} />

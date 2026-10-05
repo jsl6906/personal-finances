@@ -66,7 +66,9 @@ a:hover { color: var(--color-accent-900); }
 .section-rule { border-top: 1px solid var(--color-divider); padding-top: var(--space-3); display: flex;
   flex-direction: column; gap: var(--space-2); }
 
-.table-card { padding: 0; min-width: 0; overflow-x: auto; }
+/* Don't scroll the card itself: its blueprint corners sit 6px outside and would add both scrollbars. */
+.table-card { padding: 0; gap: 0; min-width: 0; }
+.table-scroll { overflow-x: auto; overflow-y: hidden; }
 /* Card whose body scrolls to fit the height set by its grid sibling instead of growing the row. */
 .fill-card { min-height: 320px; }
 .fill-card > .fill-scroll { flex: 1; min-height: 0; position: relative; }

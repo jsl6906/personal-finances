@@ -9,7 +9,7 @@ import { iso, money, monthLabel, parseIso, shortDate } from '../format'
 import { accountPath, categoryPath, txnPath } from '../links'
 import { numParam, sortRows, useUrl, useUrlSort } from '../urlState'
 import { AnomalyList } from './AnomalyList'
-import { Button, Card, ErrorNote, Field, Seg, SortTh } from './ui'
+import { Button, Card, ErrorNote, Field, Seg, SortTh, TableCard } from './ui'
 
 export function RangeSeg({ value, onChange }: { value: DetailRange; onChange: (r: DetailRange) => void }) {
   return (
@@ -60,7 +60,6 @@ export function Breakdown({ kicker, rows, to, value, empty = 'Nothing in this ra
   )
 }
 
-/** Full-bleed table card; the scroll wrapper sits inside so the blueprint corners don't trigger scrollbars. */
 export function RenameCard({ initial, pending, onSave, onCancel, meta }: {
   initial: string; pending: boolean; onSave: (name: string) => void; onCancel: () => void; meta?: ReactNode
 }) {
@@ -125,16 +124,6 @@ export function BudgetCard({ budget, target, meta, onDone }: {
         </div>
       </form>
       <div className="card-meta">{meta}{meta && ' '}<Link to="/budgets">All budgets</Link></div>
-    </Card>
-  )
-}
-
-export function TableCard({ children, head, foot }: { children: ReactNode; head?: ReactNode; foot?: ReactNode }) {
-  return (
-    <Card style={{ padding: 0, gap: 0 }}>
-      {head}
-      <div style={{ overflowX: 'auto' }}>{children}</div>
-      {foot}
     </Card>
   )
 }

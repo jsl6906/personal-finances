@@ -4,8 +4,7 @@ import { Link } from 'react-router-dom'
 import { del, post, put } from '../api'
 import { useUrl, useUrlText } from '../urlState'
 import { Editor, type Column } from './CrudTable'
-import { TableCard } from './Detail'
-import { Button, ErrorNote, Field } from './ui'
+import { Button, ErrorNote, Field, TableCard } from './ui'
 
 type Row = { id: number } & Record<string, unknown>
 

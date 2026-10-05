@@ -7,7 +7,7 @@ import {
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { StatementChecks } from '../components/StatementCheck'
-import { Button, Card, ErrorNote, Field, ProgressBar, Seg, SortTh } from '../components/ui'
+import { Button, Card, ErrorNote, Field, ProgressBar, Seg, SortTh, TableCard } from '../components/ui'
 import { fullDate, money, shortDate } from '../format'
 import { txnPath } from '../links'
 import { useAccounts, useJob, useMembers, useTags } from '../hooks'
@@ -661,7 +661,7 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
         )}
       </div>
 
-      <Card className="table-card">
+      <TableCard>
         <table className="table" style={{ fontSize: 13 }}>
           <thead>
             <tr>
@@ -708,7 +708,7 @@ function DuplicateStep({ b, onChanged }: { b: BatchDetail; onChanged: () => void
             {!shown.length && <tr><td colSpan={7} className="text-muted">Nothing in this view.</td></tr>}
           </tbody>
         </table>
-      </Card>
+      </TableCard>
       <ErrorNote error={decide.error || pairs.error} />
     </div>
   )

@@ -9,8 +9,7 @@ import { fullDate, money, shortDate } from '../format'
 import { useJob } from '../hooks'
 import { accountPath, txnPath } from '../links'
 import { oneOf, sortRows, useUrl, useUrlSort } from '../urlState'
-import { TableCard } from './Detail'
-import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh } from './ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, SortTh, TableCard } from './ui'
 
 const STATUS_LABEL: Record<CheckStatus, string> = {
   ok: 'Matches', explained: 'Explained', mismatch: 'Differences', unverified: 'Not checked',

@@ -6,7 +6,7 @@ import { shortDate } from '../format'
 import { useJob } from '../hooks'
 import { merchantPath } from '../links'
 import { oneOf, useKeyedState, useUrl, useUrlText } from '../urlState'
-import { Button, Card, ErrorNote, ProgressBar, Seg } from './ui'
+import { Button, Card, ErrorNote, ProgressBar, Seg, TableCard } from './ui'
 
 type View = 'merge' | 'rename' | 'minor'
 type Sort = 'txns' | 'merchants'
@@ -220,7 +220,12 @@ export function MerchantReview() {
         </div>
       )}
 
-      <Card className="table-card">
+      <TableCard foot={filtered.length > shown.length && (
+        <div className="table-foot">
+          <span className="text-muted">Showing {shown.length} of {filtered.length.toLocaleString()}</span>
+          <Button variant="ghost" onClick={() => setLimit((n) => n + PAGE * 4)}>Show more</Button>
+        </div>
+      )}>
         <table className="table">
           <thead>
             <tr>
@@ -246,13 +251,7 @@ export function MerchantReview() {
             )}
           </tbody>
         </table>
-        {filtered.length > shown.length && (
-          <div className="table-foot">
-            <span className="text-muted">Showing {shown.length} of {filtered.length.toLocaleString()}</span>
-            <Button variant="ghost" onClick={() => setLimit((n) => n + PAGE * 4)}>Show more</Button>
-          </div>
-        )}
-      </Card>
+      </TableCard>
     </>
   )
 }

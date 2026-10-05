@@ -6,7 +6,7 @@ import { CategorySelect } from '../components/CategorySelect'
 import { CrudTable } from '../components/CrudTable'
 import { MerchantReview } from '../components/MerchantReview'
 import { RuleEditor } from '../components/RuleEditor'
-import { Button, Card, ErrorNote, Seg, SortTh } from '../components/ui'
+import { Button, Card, ErrorNote, Seg, SortTh, TableCard } from '../components/ui'
 import { useCategories } from '../hooks'
 import { categoryPath } from '../links'
 import { ruleBody, ruleDraft, SOURCE_LABELS } from '../rules'
@@ -131,7 +131,12 @@ function RuleList() {
       </div>
       <ErrorNote error={rules.error || toggle.error || remove.error} />
 
-      <Card className="table-card">
+      <TableCard foot={filtered.length > shown.length && (
+        <div className="table-foot">
+          <span className="text-muted">Showing {shown.length} of {filtered.length.toLocaleString()}</span>
+          <Button variant="ghost" onClick={() => set({ all: true })}>Show all</Button>
+        </div>
+      )}>
         <table className="table">
           <thead>
             <tr>
@@ -170,13 +175,7 @@ function RuleList() {
             )}
           </tbody>
         </table>
-        {filtered.length > shown.length && (
-          <div className="table-foot">
-            <span className="text-muted">Showing {shown.length} of {filtered.length.toLocaleString()}</span>
-            <Button variant="ghost" onClick={() => set({ all: true })}>Show all</Button>
-          </div>
-        )}
-      </Card>
+      </TableCard>
     </>
   )
 }
