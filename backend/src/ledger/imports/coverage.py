@@ -409,8 +409,8 @@ async def _check_account(
     def near(t: _Txn) -> bool:
         return (t.date - ps).days < EDGE_DAYS or (pe - t.date).days < EDGE_DAYS
 
-    def redate(row: _Row, name: str, t: _Txn, hint: str, conf: int) -> dict:
-        effect = Decimal(0) if ps <= row.date <= pe else -t.amount
+    def redate(row: _Row, name: str, t: _Txn, hint: str, conf: int, counted: bool = True) -> dict:
+        effect = -t.amount if counted and not ps <= row.date <= pe else Decimal(0)
         issue = _issue("listed", "date", row, t, effect, hint, suggested=True, confidence=conf)
         issue["row"]["statement"] = name
         return issue
@@ -448,7 +448,7 @@ async def _check_account(
         if t.id in others:
             name, row = others[t.id]
             if row and row.date != t.date:
-                issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}", 95))
+                issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}", 95, counted=False))
             else:
                 issues.append(_issue("listed", None, None, t, Decimal(0), f"Listed on {name}"))
         elif nearby and not nearby[0][0]:
@@ -537,8 +537,11 @@ async def _check_account(
         i["confidence"] = min(i["confidence"], cap)
 
     stmt_total = sum((s.amount for s in S), Decimal(0))
-    in_period = [t for t in L.values() if ps <= t.date <= pe]
-    ledger_total = sum((t.amount for t in in_period), Decimal(0)) + sum((s.amount for s in S if s.incoming), Decimal(0))
+    # The ledger on the statement's terms: matched transactions whatever their date, plus unmatched ones in the period
+    # that no other statement lists.
+    counted = [t for t in L.values() if t.id in claimed or (ps <= t.date <= pe and t.id not in others)]
+    listed = [t for t in L.values() if t.id not in claimed and ps <= t.date <= pe and t.id in others]
+    ledger_total = sum((t.amount for t in counted), Decimal(0)) + sum((s.amount for s in S if s.incoming), Decimal(0))
     diff = stmt_total - ledger_total
     actionable = any(i["kind"] in ACTIONABLE for i in issues)
     status = "mismatch" if actionable else "ok" if abs(diff) < CENT and not issues else "explained"
@@ -546,10 +549,15 @@ async def _check_account(
         statement_total=stmt_total,
         ledger_total=ledger_total,
         difference=diff,
-        ledger_rows=len(in_period) + sum(1 for s in S if s.incoming),
+        ledger_rows=len(counted) + sum(1 for s in S if s.incoming),
         status=status,
     )
-    result["detail"].update(issues=issues, shifted=shifted, totals_match=abs(diff) < CENT)
+    result["detail"].update(
+        issues=issues,
+        shifted=shifted,
+        totals_match=abs(diff) < CENT,
+        listed_elsewhere={"count": len(listed), "total": str(sum((t.amount for t in listed), Decimal(0)))},
+    )
     return result
 
 

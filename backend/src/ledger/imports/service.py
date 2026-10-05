@@ -395,6 +395,13 @@ async def transaction_factory(session: AsyncSession, batch: ImportBatch):
 async def commit_batch(session: AsyncSession, batch: ImportBatch, pending_as: str = "skip") -> dict:
     if batch.status != "review":
         raise ImportError_(f"Batch is {batch.status}; only reviewed batches can be committed")
+    if batch.source_type == "document":
+        from ledger.imports.coverage import same_file_imports
+
+        if twins := await same_file_imports(session, batch):
+            raise ImportError_(
+                f"This file was already imported as {', '.join(f'#{i}' for i in twins)}; roll that import back first"
+            )
     await session.execute(
         update(ImportRow)
         .where(ImportRow.batch_id == batch.id, ImportRow.decision == "pending")

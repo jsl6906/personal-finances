@@ -83,6 +83,7 @@ function AccountCheck({ b, c, multi, onApplied }: {
   const setAll = (on: boolean, which = fixable) => setPicked(new Map(which.map((i) => [keyOf(i), on])))
   const label = c.account_name ?? (c.account_ref ? `···${c.account_ref}` : 'Statement account')
   const shifted = c.detail.shifted.length
+  const listed = c.detail.listed_elsewhere?.count ?? 0
   const before = b.status === 'review'
 
   return (
@@ -123,7 +124,10 @@ function AccountCheck({ b, c, multi, onApplied }: {
             : ' — nothing needs fixing.')}
         {c.status === 'mismatch' && 'The ledger doesn’t match the statement. The statement is treated as the record:'
           + ' suggested fixes are pre-selected; review them and apply.'}
-        {shifted > 0 && ` ${shifted} matched transaction${shifted === 1 ? ' is' : 's are'} dated just outside the period.`}
+        {(shifted > 0 || listed > 0) && ` The ledger total ${[
+          shifted > 0 && `counts ${shifted} matched transaction${shifted === 1 ? '' : 's'} dated just outside the period`,
+          listed > 0 && `leaves out ${listed} listed on another statement (${money(c.detail.listed_elsewhere?.total ?? 0)})`,
+        ].filter(Boolean).join(' and ')}.`}
       </div>
       {c.detail.message && (
         <div className="callout">

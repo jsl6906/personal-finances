@@ -226,11 +226,13 @@ async def test_edge_transaction_on_another_statement_takes_its_date(client, monk
     oct_rows = [("2021-10-15", "OCT RENT CO", -900.00)]
     bid = await _statement(client, monkeypatch, "cov_oct.pdf", "6605", ("2021-10-01", "2021-10-31"), -900.00, oct_rows)
     [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
-    assert c["status"] == "explained" and c["difference"] == "16.65"
+    assert c["status"] == "explained" and c["difference"] == "8.88"
     fixes = {i["transaction_id"]: i for i in c["detail"]["issues"]}
     assert set(fixes) == {late, diner}
     assert all(i["kind"] == "listed" and i["fix"] == "date" and i["suggested"] for i in fixes.values())
     assert fixes[late]["row"]["date"] == "2021-09-29" and fixes[late]["row"]["statement"] == "cov_sep.pdf"
+    # The late cafe is already left out of the total (cov_sep.pdf lists it); the diner moves out when redated.
+    assert fixes[late]["effect"] == "0.00" and c["detail"]["listed_elsewhere"] == {"count": 1, "total": "-7.77"}
     assert fixes[diner]["row"]["date"] == "2021-09-30" and fixes[diner]["effect"] == "8.88"
 
     body = {"fixes": [{"fix": "date", "row_id": i["row_id"], "transaction_id": t} for t, i in fixes.items()]}
@@ -242,6 +244,18 @@ async def test_edge_transaction_on_another_statement_takes_its_date(client, monk
     assert (await client.get(f"/api/transactions/{diner}")).json()["txn_date"] == "2021-09-30"
     [sep_check] = (await client.get(f"/api/imports/{sep}/checks")).json()
     assert sep_check["status"] == "ok"
+
+
+async def test_matched_rows_dated_before_the_period_count_toward_the_ledger(client, monkeypatch):
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Boundary", "mask": "6609"})).json()["id"]
+    await _txn(client, acct, "2022-02-28", "BOUNDARY SHOP", "-26.92")
+    await _txn(client, acct, "2022-03-12", "BOUNDARY CAFE", "-3.50")
+    rows = [("2022-02-28", "BOUNDARY SHOP", -26.92), ("2022-03-12", "BOUNDARY CAFE", -3.50)]
+    bid = await _statement(client, monkeypatch, "cov_mar.pdf", "6609", ("2022-03-01", "2022-03-31"), -30.42, rows)
+    await client.post(f"/api/imports/{bid}/commit", json={})
+    [c] = (await client.get(f"/api/imports/{bid}/checks")).json()
+    assert c["status"] == "ok" and c["ledger_total"] == "-30.42" and c["ledger_rows"] == 2
+    assert len(c["detail"]["shifted"]) == 1
 
 
 async def test_account_timeline_shows_gaps_and_imports_in_progress(client, monkeypatch):

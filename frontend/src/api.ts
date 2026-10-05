@@ -226,6 +226,7 @@ export interface StatementCheck {
   detail: {
     issues: CheckIssue[]; shifted: { row: CheckIssue['row']; txn: CheckIssue['txn'] }[]; message?: string
     totals_match?: boolean; unreadable_rows?: number; period_source?: 'statement' | 'rows'; same_file?: number[]
+    listed_elsewhere?: { count: number; total: string }
   }
 }
 export interface StatementCheckItem extends Omit<StatementCheck, 'detail'> {
