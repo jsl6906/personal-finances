@@ -147,7 +147,11 @@ async def budget_status(session: AsyncSession, period: Period, today: date) -> d
         budget = total_budget - allocated
         if kind == "expense":
             covered.update(members)
-        projected = _q(actual / Decimal(str(elapsed))) if 0 < elapsed < 1 else _q(actual)
+        # Spread shares are fixed for the whole period, so only the rest is extrapolated by pace.
+        spread_actual = sign * spread
+        projected = (
+            _q(spread_actual + (actual - spread_actual) / Decimal(str(elapsed))) if 0 < elapsed < 1 else _q(actual)
+        )
         rows.append(
             {
                 "budget_id": b.id,

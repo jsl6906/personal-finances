@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { ACCOUNT_TYPES, get, type AlertEvent, type Balances, type BudgetStatus, type CashflowMonth, type Summary, type TransactionPage } from '../api'
+import { ACCOUNT_TYPES, get, type AlertEvent, type Balances, type BudgetRow, type BudgetStatus, type CashflowMonth, type Summary, type TransactionPage } from '../api'
 import { AnomalyList } from '../components/AnomalyList'
 import { CashflowChart, Legend } from '../components/Charts'
 import { BalanceSparkline } from '../components/LineChart'
@@ -9,6 +9,10 @@ import { Button, Card } from '../components/ui'
 import { fullDate, iso, money, moneyRound, monthEnd, monthLabel, parseIso, shortDate } from '../format'
 import { useAccounts, useAnomalies, useBalanceTrend } from '../hooks'
 import { accountPath, categoryPath, groupPath, txnPath } from '../links'
+import { BudgetBar } from './Budgets'
+
+// Always listed on the dashboard (category or group budget names).
+const PINNED_BUDGETS = ['Shopping', 'Restaurants & Fast Food', 'Groceries']
 
 export function Dashboard() {
   const navigate = useNavigate()
@@ -26,6 +30,20 @@ export function Dashboard() {
     queryFn: () => get<BudgetStatus>('/budgets/status', { period: 'month', on: start }),
   })
   const bs = budget.data
+  const RANK = { over: 0, pace: 1, ok: 2 }
+  const expenseRows = (bs?.rows ?? []).filter((r) => r.kind === 'expense')
+  const flagged = expenseRows.filter((r) => r.status !== 'ok').sort((a, b) => RANK[a.status] - RANK[b.status] || b.pct - a.pct)
+  const pinned = expenseRows.filter((r) => r.status === 'ok' && PINNED_BUDGETS.includes(r.name.replace(/ · everything else$/, '')))
+  const budgetRows = [...flagged, ...pinned, ...expenseRows.filter((r) => r.status === 'ok' && !pinned.includes(r))]
+    .slice(0, Math.max(6, flagged.length + pinned.length))
+  // The overall budget's own row is net of the other budgets, so the top row shows all spending against the total.
+  const overall = bs && expenseRows.some((r) => r.scope === 'overall') ? (() => {
+    const projected = expenseRows.reduce((a, r) => a + Number(r.projected), 0)
+    const spent = Number(bs.total.spent)
+    const total = Number(bs.total.budget)
+    const status: BudgetRow['status'] = spent > total ? 'over' : projected > total ? 'pace' : 'ok'
+    return { spent, total, status, pct: total > 0 ? (spent / total) * 100 : 0 }
+  })() : null
   const flow = useQuery({ queryKey: ['analytics', 'cashflow', 12], queryFn: () => get<CashflowMonth[]>('/analytics/cashflow', { months: 12 }) })
   const anomalies = useAnomalies()
   const balances = useQuery({ queryKey: ['balances'], queryFn: () => get<Balances>('/balances') })
@@ -89,11 +107,20 @@ export function Dashboard() {
           <Link to="/budgets" className="btn btn-ghost">All budgets</Link>
         </div>
         <div className="stack-3">
-          {(bs?.rows ?? []).filter((r) => r.kind === 'expense').slice(0, 6).map((r) => (
+          {overall && (
+            <div className="budget-row" style={{ fontWeight: 600 }}>
+              <div><Link to="/budgets">All spending</Link></div>
+              <BudgetBar pct={overall.pct} elapsed={bs?.period.elapsed ?? 0} status={overall.status} />
+              <div className={`nowrap${overall.status === 'over' ? ' text-over' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {moneyRound(overall.spent)} / {moneyRound(overall.total)}
+              </div>
+            </div>
+          )}
+          {budgetRows.map((r) => (
             <div key={r.budget_id} className="budget-row">
               <div>{r.category_id ? <Link to={categoryPath(r.category_id)}>{r.name}</Link>
                 : r.group_id ? <Link to={groupPath(r.group_id)}>{r.name}</Link> : r.name}</div>
-              <div className={`progress budget-bar ${r.status}`}><div style={{ width: `${Math.min(100, r.pct)}%` }} /></div>
+              <BudgetBar pct={r.pct} elapsed={bs?.period.elapsed ?? 0} status={r.status} />
               <div className={`nowrap${r.status === 'over' ? ' text-over' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {moneyRound(r.actual)} / {moneyRound(r.budget)}
               </div>

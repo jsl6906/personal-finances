@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -132,8 +132,10 @@ def guess_account_type(name: str, hint: str | None = None) -> str:
 
 
 async def ensure_account(session: AsyncSession, kind: str, fa: FeedAccount) -> Account:
-    """Find the account linked to this feed account (external_refs[kind]), else match by mask or name, else create."""
-    acct = await session.scalar(select(Account).where(Account.external_refs[kind].astext == fa.key))
+    """Find the account linked to this feed account (external_refs[kind]), else match by mask or name, else create.
+    external_refs[kind] may be a list when several feed accounts were merged into one (e.g. two cards)."""
+    ref = Account.external_refs[kind]
+    acct = await session.scalar(select(Account).where(or_(ref.astext == fa.key, ref.contains([fa.key]))))
     if acct is None:
         tail = last4(fa.mask) or last4(fa.name)
         if tail:
@@ -162,7 +164,11 @@ async def ensure_account(session: AsyncSession, kind: str, fa: FeedAccount) -> A
             external_refs={},
         )
         session.add(acct)
-    if (acct.external_refs or {}).get(kind) != fa.key:
+    linked = (acct.external_refs or {}).get(kind)
+    if isinstance(linked, list):
+        if fa.key not in linked:
+            acct.external_refs = {**acct.external_refs, kind: [*linked, fa.key]}
+    elif linked != fa.key:
         acct.external_refs = {**(acct.external_refs or {}), kind: fa.key}
     await session.flush()
     return acct

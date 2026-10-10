@@ -50,6 +50,15 @@ async def test_budget_status_with_spreading(client, cats):
     assert rows["TB Groceries"]["budget"] == 1200 and rows["TB Groceries"]["actual"] == 450
     assert rows["TB Insurance"]["actual"] == 300
 
+    # Mid-period, spread shares count as already-known spending rather than being extrapolated by pace
+    from ledger.budgets.service import budget_status, period_for
+    from ledger.db.engine import get_sessionmaker
+
+    async with get_sessionmaker()() as session:
+        mid = await budget_status(session, period_for("month", date(2025, 3, 1)), date(2025, 3, 15))
+    ins = {r["name"]: r for r in mid["rows"]}["TB Insurance"]
+    assert ins["projected"] == 100 and ins["status"] == "ok"
+
     # Next month still carries the spread shares
     apr = (await client.get("/api/budgets/status", params={"period": "month", "on": "2025-04-01"})).json()
     rows = {r["name"]: r for r in apr["rows"]}

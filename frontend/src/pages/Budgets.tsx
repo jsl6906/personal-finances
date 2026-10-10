@@ -15,7 +15,7 @@ function shift(on: string, period: PeriodType, dir: number): string {
   return iso(new Date(d.getFullYear(), d.getMonth() + dir * months, 1))
 }
 
-function BudgetBar({ pct, elapsed, status }: { pct: number; elapsed: number; status: BudgetRow['status'] }) {
+export function BudgetBar({ pct, elapsed, status }: { pct: number; elapsed: number; status: BudgetRow['status'] }) {
   return (
     <div className={`progress budget-bar ${status}`}>
       <div style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />

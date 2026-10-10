@@ -375,3 +375,48 @@ async def test_same_file_imported_twice_is_flagged_not_explained(client, monkeyp
     assert not any(i["suggested"] for i in c["detail"]["issues"])
     r = await client.post(f"/api/imports/{second}/commit", json={"pending_as": "keep"})
     assert r.status_code == 409 and f"#{first}" in r.json()["detail"]
+
+
+async def test_cards_sharing_an_account_are_checked_together(client, monkeypatch):
+    from ledger.ai import imports as ai_imports
+
+    acct = (await client.post("/api/accounts", json={"name": "Coverage Shared Card", "mask": "6611"})).json()["id"]
+    await _txn(client, acct, "2022-01-03", "SHARED GROCER", "-40.00")
+    await _txn(client, acct, "2022-01-15", "SHARED PAYMENT THANK YOU", "100.00")
+    await _txn(client, acct, "2022-01-10", "AUTHORIZED USER CAFE", "-12.50")
+
+    async def fake_extract(data, mime_type, filename):
+        txn = ai_imports.ExtractedTxn
+        return ai_imports.ExtractedStatement(
+            document_type="credit_card_statement",
+            institution="Coverage Bank",
+            period_start="2022-01-01",
+            period_end="2022-01-31",
+            accounts=[
+                # Only the primary card prints balances, and they cover both cards.
+                ai_imports.StatementAccount(last4="6611", name="Primary", opening_balance=0, closing_balance=47.5),
+                ai_imports.StatementAccount(last4="6612", name="Authorized User"),
+            ],
+            sign_note="as printed",
+            summary="Shared card statement",
+            transactions=[
+                txn(date="2022-01-03", description="SHARED GROCER", amount=-40, confidence=0.99, account="6611"),
+                txn(date="2022-01-15", description="SHARED PAYMENT THANK YOU", amount=100, confidence=0.99, account="6611"),
+                txn(date="2022-01-10", description="AUTHORIZED USER CAFE", amount=-12.5, confidence=0.99, account="6612"),
+            ],
+        )
+
+    monkeypatch.setattr(ai_imports, "extract_statement", fake_extract)
+    b = (await client.post("/api/imports", files={"file": ("shared.pdf", b"%PDF-1.7 shared", "application/pdf")})).json()
+    await _run("extract_document", {"batch_id": b["id"]})
+    d = (await client.get(f"/api/imports/{b['id']}")).json()
+    defaults = {**d["defaults"], "account_map": {"6611": acct, "6612": acct}}
+    await client.post(f"/api/imports/{b['id']}/prepare", json={"mapping": d["mapping"], "defaults": defaults})
+    await _run("prepare_import", {"batch_id": b["id"]})
+
+    [c] = (await client.get(f"/api/imports/{b['id']}/checks")).json()
+    assert (c["account_ref"], c["account_id"], c["statement_rows"]) == ("6611+6612", acct, 3)
+    assert c["trusted"] is True and c["status"] == "ok", c["detail"]["issues"]
+    await client.post(f"/api/imports/{b['id']}/commit", json={})
+    [c] = (await client.get(f"/api/imports/{b['id']}/checks")).json()
+    assert c["status"] == "ok" and c["difference"] == "0.00"

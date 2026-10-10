@@ -186,15 +186,86 @@ async def check_batch(session: AsyncSession, batch: ImportBatch) -> list[dict]:
     period = (parse_date(meta.get("period_start")), parse_date(meta.get("period_end")))
     account_map = batch.defaults.get("account_map") or {}
     twins = await same_file_imports(session, batch)
-    out = []
+    review = batch.status == "review"
+    # (refs, mapped account, ledger account shared by several refs)
+    plan: list[tuple[list[str], int | None, int | None]] = []
     for a in accounts or [None]:
         ref = a["ref"] if a else ""
-        recon = a.get("reconciliation") if a else meta.get("reconciliation")
         mapped = (account_map.get(ref) if a else None) or (batch.defaults.get("account_id") if len(accounts) <= 1 else None)
+        acct = None
+        if len(accounts) > 1:
+            acct, _ = await _resolve_account(session, review, _valid(groups.get(ref, [])), links, mapped)
+        same = next((p for p in plan if acct and p[2] == acct), None)
+        if same:
+            same[0].append(ref)
+        else:
+            plan.append(([ref], mapped, acct))
+    by_ref = {a["ref"]: a for a in accounts}
+    out = []
+    for refs, mapped, acct in plan:
+        if len(refs) == 1:
+            ref = refs[0]
+            recon = by_ref[ref].get("reconciliation") if accounts else meta.get("reconciliation")
+            out.append(
+                await _check_account(
+                    session, batch, ref, groups.get(ref, []), links, period, recon, mapped, not accounts, twins
+                )
+            )
+            continue
+        # Cards on one account (e.g. an authorised user's) share its balance, so they're checked together.
+        rows_ = [r for ref in refs for r in groups.get(ref, [])]
+        recon = _joint_reconciliation([by_ref[ref] for ref in refs], groups)
         out.append(
-            await _check_account(session, batch, ref, groups.get(ref, []), links, period, recon, mapped, not accounts, twins)
+            await _check_account(
+                session, batch, "+".join(refs), rows_, links, period, recon, acct, False, twins, account=acct
+            )
         )
     return out
+
+
+def _valid(rows: list[ImportRow]) -> list[ImportRow]:
+    return [r for r in rows if r.txn_date and r.amount is not None and r.decision != "invalid"]
+
+
+def _joint_reconciliation(accounts: list[dict], groups: dict[str, list[ImportRow]]) -> dict | None:
+    """Several statement accounts' rows together against the balance changes the statement prints for them."""
+    recs = [a["reconciliation"] for a in accounts if a.get("reconciliation")]
+    if not recs:
+        return None
+    total = sum((r.amount for a in accounts for r in _valid(groups.get(a["ref"], []))), Decimal(0))
+    change = sum((Decimal(r["balance_change"]) for r in recs), Decimal(0))
+    return {
+        "sum_of_rows": _money(total),
+        "balance_change": _money(change),
+        "reconciles": abs(abs(change) - abs(total)) < Decimal("0.02"),
+    }
+
+
+async def _resolve_account(
+    session: AsyncSession, review: bool, valid: list[ImportRow], links: dict[int, int], mapped: int | None
+) -> tuple[int | None, dict[int, int]]:
+    """The ledger account for a statement account's rows (before commit, the one picked; afterwards, where the linked
+    transactions live, as accounts get merged after import) and the account of each linked transaction."""
+    linked = [links[r.id] for r in valid if links.get(r.id) and not (review and r.decision in ("insert", "keep"))]
+    acct_of = dict(
+        (
+            await session.execute(
+                select(Transaction.id, Transaction.account_id).where(
+                    id_in(Transaction.id, linked), Transaction.deleted_at.is_(None)
+                )
+            )
+        ).all()
+    )
+    picked = Counter(r.account_id for r in valid if r.account_id).most_common(1)
+    held = Counter(acct_of[i] for i in linked if acct_of.get(i)).most_common(1)
+    if mapped and not await session.scalar(select(Account.id).where(Account.id == mapped)):
+        mapped = None
+    order = (
+        [picked and picked[0][0], mapped, held and held[0][0]]
+        if review
+        else [held and held[0][0], mapped, picked and picked[0][0]]
+    )
+    return next((a for a in order if a), None), acct_of
 
 
 async def same_file_imports(session: AsyncSession, batch: ImportBatch) -> list[int]:
@@ -227,12 +298,13 @@ async def _check_account(
     mapped: int | None,
     legacy: bool,
     twins: list[int],
+    account: int | None = None,
 ) -> dict:
     """`mapped`: the ledger account chosen for this statement account at import; `legacy`: the document was read
     before statements were split by account, so its rows may span several accounts; `twins`: other committed imports
-    of the same file."""
+    of the same file; `account`: the ledger account already resolved for these rows."""
     review = batch.status == "review"
-    valid = [r for r in rows if r.txn_date and r.amount is not None and r.decision != "invalid"]
+    valid = _valid(rows)
     trusted = None if not recon else bool(recon.get("reconciles"))
     result = {
         "account_ref": ref,
@@ -267,28 +339,9 @@ async def _check_account(
         for r in valid
     ]
 
-    # Before commit, the account the user picked; afterwards, where the linked transactions actually live (accounts
-    # get merged and re-linked after import).
     linked = [s.link for s in S if s.link]
-    acct_of = dict(
-        (
-            await session.execute(
-                select(Transaction.id, Transaction.account_id).where(
-                    id_in(Transaction.id, linked), Transaction.deleted_at.is_(None)
-                )
-            )
-        ).all()
-    )
-    picked = Counter(r.account_id for r in valid if r.account_id).most_common(1)
-    held = Counter(acct_of[i] for i in linked if acct_of.get(i)).most_common(1)
-    if mapped and not await session.scalar(select(Account.id).where(Account.id == mapped)):
-        mapped = None
-    order = (
-        [picked and picked[0][0], mapped, held and held[0][0]]
-        if review
-        else [held and held[0][0], mapped, picked and picked[0][0]]
-    )
-    account_id = next((a for a in order if a), None)
+    resolved, acct_of = await _resolve_account(session, review, valid, links, mapped)
+    account_id = account or resolved
     if account_id is None:
         result["detail"]["message"] = "Choose the ledger account for this statement account"
         return result
