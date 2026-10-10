@@ -5,7 +5,7 @@ import { get, post, upload, type BatchDetail, type BatchSummary } from '../api'
 import { Button, Card, ErrorNote, Icon, SortTh } from '../components/ui'
 import { StatementChecksPanel } from '../components/StatementCheck'
 import { fullDate } from '../format'
-import { STATUS_TAG, STEP_NAMES } from '../review'
+import { ORIGINS, STATUS_TAG, STEP_NAMES } from '../review'
 import { sortRows, useUrlSort } from '../urlState'
 
 const SHEET_ACCEPT = '.csv,.tsv,.txt,.xlsx,.xlsm,.xls'
@@ -104,7 +104,7 @@ export function ImportHome() {
               inserted: (b) => b.stats.inserted, dups: (b) => b.stats.skipped_duplicates, when: (b) => b.created_at,
             }).map((b) => (
               <tr key={b.id} className="clickable" onClick={() => navigate(`/import/${b.id}`)}>
-                <td>{b.filename}</td>
+                <td>{b.filename || <span className="text-muted" style={{ fontStyle: 'italic' }}>{ORIGINS[b.origin] ?? b.origin} sync</span>}</td>
                 <td className="text-muted">{b.source_type}{b.origin !== 'upload' ? ` · ${b.origin}` : ''}</td>
                 <td><span className={`tag ${STATUS_TAG[b.status] ?? 'tag-neutral'}`}>{b.status.replace('_', ' ')}</span></td>
                 <td>{b.row_count}</td>

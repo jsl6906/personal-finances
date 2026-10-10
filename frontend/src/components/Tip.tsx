@@ -81,12 +81,12 @@ function Contrib({ params, show }: { params: ContribParams; show: 'merchants' | 
     <div className="tip-body">
       {show === 'merchants' ? (
         <table>
-          <thead><tr><th>Merchant</th><th className="num">#</th><th className="num">Out</th><th className="num">In</th></tr></thead>
+          <thead><tr><th>Merchant</th><th className="num">#</th><th className="num">Net</th></tr></thead>
           <tbody>
             {d.merchants.map((m) => (
               <tr key={m.key}>
                 <td className="tip-name">{m.name}</td><td className="num">{m.count}</td>
-                <td className="num">{m.out ? money(-m.out) : ''}</td><td className="num">{m.in ? money(m.in) : ''}</td>
+                <td className="num">{money(m.in - m.out)}</td>
               </tr>
             ))}
           </tbody>

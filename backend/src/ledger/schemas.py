@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CategoryType = Literal["expense", "income", "transfer"]
 AccountType = Literal[
@@ -47,6 +47,35 @@ class AccountIn(BaseModel):
 class AccountOut(AccountIn, ORM):
     id: int
     institution_name: str | None = None
+
+
+ValuationMethod = Literal["manual", "rentcast", "depreciation"]
+
+
+class AssetIn(BaseModel):
+    method: ValuationMethod = "manual"
+    loan_account_id: int | None = None
+    purchase_date: date | None = None
+    purchase_price: Decimal | None = Field(default=None, ge=0)
+    address: str | None = Field(default=None, max_length=300)
+    depreciation_rate: Decimal | None = Field(default=None, ge=0, le=Decimal("0.5"))
+
+    @model_validator(mode="after")
+    def _method_inputs(self):
+        if self.method == "rentcast" and not (self.address or "").strip():
+            raise ValueError("RentCast valuation needs the full address (Street, City, State, Zip)")
+        return self
+
+
+class AssetCreate(AssetIn):
+    name: str = Field(min_length=1, max_length=200)
+    account_type: Literal["property", "vehicle"]
+    value: Decimal | None = Field(default=None, ge=0)
+
+
+class ValuationIn(BaseModel):
+    value: Decimal = Field(ge=0)
+    as_of: date | None = None
 
 
 class MemberIn(BaseModel):

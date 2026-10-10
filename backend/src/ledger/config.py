@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     google_service_account_json: SecretStr | None = None
     # Local archive folder for backfill (mounted volume in Docker)
     inbox_dir: Path | None = None
+    # Home value estimates (https://app.rentcast.io/app/api; free tier is 50 lookups/month)
+    rentcast_api_key: SecretStr | None = None
 
     static_dir: Path | None = None
     max_upload_mb: int = 25

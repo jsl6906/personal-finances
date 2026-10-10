@@ -5,6 +5,7 @@ import {
   get, patch, post, put,
   type Balances, type DataSource, type HoldingRow, type Job, type SourcesInfo,
 } from '../api'
+import { AssetsCard } from '../components/Assets'
 import { BackfillCard } from '../components/Backfill'
 import { BalanceSparkline } from '../components/LineChart'
 import { Button, Card, ErrorNote, SortTh } from '../components/ui'
@@ -91,11 +92,12 @@ export function Sources() {
           </div>
           <div className="card-title">Uploads</div>
           <p className="card-body">Spreadsheets, statement PDFs and bills from the <Link to="/import">Import</Link> and{' '}
-            <Link to="/bills">Bills</Link> screens, or attached in <Link to="/chat">chat</Link>. Home, vehicles and TSP values are entered here.</p>
+            <Link to="/bills">Bills</Link> screens, or attached in <Link to="/chat">chat</Link>. Home and vehicle values are tracked under Assets below.</p>
         </Card>
       </div>
 
       <BackfillCard />
+      <AssetsCard />
       <BalancesCard />
       <HoldingsCard />
     </section>

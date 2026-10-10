@@ -21,7 +21,7 @@ $session = [Convert]::ToBase64String($bytes) -replace '[+/=]', ''
 $lines = @("# Ledger production settings (Azure Postgres via service principal)")
 foreach ($k in $azure.Keys) { $lines += "$k=$($azure[$k])" }
 $lines += "", "APP_PASSWORD_HASH=$($local['APP_PASSWORD_HASH'])", "SESSION_SECRET=$session", "COOKIE_SECURE=false"
-$lines += "GEMINI_KEY=$($local['GEMINI_KEY'])", "", "GOOGLE_SERVICE_ACCOUNT_FILE=/secrets/google-sa.json", ""
+$lines += "GEMINI_KEY=$($local['GEMINI_KEY'])", "RENTCAST_API_KEY=$($local['RENTCAST_API_KEY'])", "", "GOOGLE_SERVICE_ACCOUNT_FILE=/secrets/google-sa.json", ""
 foreach ($k in "SMTP_HOST", "SMTP_PORT", "SMTP_SECURITY", "SMTP_USERNAME", "SMTP_FROM", "SMTP_PASSWORD") { $lines += "$k=$($local[$k])" }
 $lines += "APP_BASE_URL=http://mediaserver:8470", "TZ=America/New_York"
 

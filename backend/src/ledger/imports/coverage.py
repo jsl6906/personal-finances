@@ -506,8 +506,9 @@ async def _check_account(
             name, row = others[t.id]
             if row and row.date != t.date:
                 issues.append(redate(row, name, t, f"Listed on {name} dated {row.date.isoformat()}", 95, counted=False))
-            else:
+            elif not row:
                 issues.append(_issue("listed", None, None, t, Decimal(0), f"Listed on {name}"))
+            # Same printed date: the other statement cycles by posting date; counted in listed_elsewhere only.
         elif nearby and not nearby[0][0]:
             *_, row, name = nearby[0]
             used.add(row.id)

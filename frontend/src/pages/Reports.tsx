@@ -50,7 +50,7 @@ export function Reports() {
   const toYear = numParam(params, 'to') ?? thisYear
   const { start, end } = rangeDates(range, firstYear, fromYear, toYear)
   const month = params.get('month')
-  const pickMonth = (m: string | null) => set({ month: m })
+  const pickMonth = (m: string | null) => set({ month: m === month ? null : m })
   const focus = month ? { start: month, end: monthEnd(month) } : { start, end }
 
   const flow = useQuery({ queryKey: ['analytics', 'cashflow', start, end], queryFn: () => get<CashflowMonth[]>('/analytics/cashflow', { start, end }) })
@@ -165,7 +165,7 @@ export function Reports() {
             ...(c.q.data?.series ?? []).map((s, i) => ({ label: `${s.name} ${moneyRound(s.total / n)}/mo`, color: stackColor(s.name, i) })),
             { label: '12-mo avg', color: 'var(--color-text)', dashed: true },
           ]} />
-          {c.key === 'exp' && <div className="card-meta">Hover a bar or segment for its top merchants; click a month to break it down below.</div>}
+          {c.key === 'exp' && <div className="card-meta">Hover a bar or segment for its top merchants; click a month to break it down below, click it again to clear.</div>}
         </Card>
       ))}
 

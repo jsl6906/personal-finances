@@ -289,6 +289,16 @@ export interface BalanceRow {
   balance: number; available: number | null; balance_30d_ago: number | null; source: string
 }
 export interface Balances { accounts: BalanceRow[]; assets: number; liabilities: number; net_worth: number }
+export type ValuationMethod = 'manual' | 'rentcast' | 'depreciation'
+export interface AssetRow {
+  account_id: number; name: string; account_type: 'property' | 'vehicle'; is_hidden: boolean; method: ValuationMethod
+  loan_account_id: number | null; purchase_date: string | null; purchase_price: number | null; address: string | null
+  depreciation_rate: number | null; last_valued_at: string | null; last_error: string | null
+  last_result: { value?: number; low?: number; high?: number; comparables?: number; basis?: string; since?: string; rate?: number; skipped?: string }
+  value: number | null; value_as_of: string | null; value_source: string | null
+  loan_name: string | null; loan_balance: number | null; loan_as_of: string | null; equity: number | null
+}
+export interface AssetsInfo { rentcast_configured: boolean; default_depreciation_rate: number; assets: AssetRow[] }
 export type BalanceTrend = Record<string, { as_of: string; balance: number }[]>
 export interface HoldingRow {
   account_id: number; account: string; as_of: string; symbol: string | null; description: string | null

@@ -1,5 +1,6 @@
 from ledger.models.alerts import AlertEvent, AlertRecipient, AlertRule
 from ledger.models.analytics import Anomaly
+from ledger.models.assets import Asset
 from ledger.models.backfill import BackfillFile
 from ledger.models.budgets import Budget, SpreadRule
 from ledger.models.chat import ChatMessage, ChatSession
@@ -37,6 +38,7 @@ __all__ = [
     "AlertRule",
     "Anomaly",
     "AppSetting",
+    "Asset",
     "Attachment",
     "BackfillFile",
     "Budget",

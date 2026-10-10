@@ -76,6 +76,17 @@ def build_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,
     )
     scheduler.add_job(
+        _enqueue,
+        "cron",
+        day=1,
+        hour=s.nightly_hour,
+        minute=30,
+        args=["value_assets"],
+        id="monthly-asset-values",
+        coalesce=True,
+        misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
         _backfill_watchdog, "interval", minutes=10, id="backfill-watchdog", coalesce=True, max_instances=1
     )
     return scheduler

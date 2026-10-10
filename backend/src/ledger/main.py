@@ -10,6 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import ledger.ai.categorize  # noqa: F401  (registers job handler)
 import ledger.ai.merchant_review  # noqa: F401  (registers job handler)
 import ledger.analytics.jobs  # noqa: F401  (registers job handlers)
+import ledger.assets.service  # noqa: F401  (registers job handler)
 import ledger.imports.jobs  # noqa: F401  (registers job handlers)
 import ledger.maintenance  # noqa: F401  (registers job handlers)
 import ledger.sources.jobs  # noqa: F401  (registers job handlers)
@@ -18,6 +19,7 @@ from ledger import auth
 from ledger.api import (
     alerts,
     analytics,
+    assets,
     backfill,
     budgets,
     chat,
@@ -87,6 +89,7 @@ app.include_router(merchant_review.router, prefix="/api", dependencies=protected
 app.include_router(chat.router, prefix="/api", dependencies=protected)
 app.include_router(alerts.router, prefix="/api", dependencies=protected)
 app.include_router(sources.router, prefix="/api", dependencies=protected)
+app.include_router(assets.router, prefix="/api", dependencies=protected)
 app.include_router(backfill.router, prefix="/api", dependencies=protected)
 
 

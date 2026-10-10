@@ -301,6 +301,14 @@ async def test_matched_rows_dated_before_the_period_count_toward_the_ledger(clie
     assert c["status"] == "ok" and c["ledger_total"] == "-30.42" and c["ledger_rows"] == 2
     assert len(c["detail"]["shifted"]) == 1
 
+    # February's own check: the shop falls in its dates but March lists it with the same date, so nothing to explain.
+    rows = [("2022-02-14", "BOUNDARY FLORIST", -40.00)]
+    feb = await _statement(client, monkeypatch, "cov_feb.pdf", "6609", ("2022-02-01", "2022-02-28"), -40.00, rows)
+    await client.post(f"/api/imports/{feb}/commit", json={})
+    [c] = (await client.get(f"/api/imports/{feb}/checks")).json()
+    assert c["status"] == "ok" and c["detail"]["issues"] == []
+    assert c["detail"]["listed_elsewhere"] == {"count": 1, "total": "-26.92"}
+
 
 async def test_account_timeline_shows_gaps_and_imports_in_progress(client, monkeypatch):
     acct = (await client.post("/api/accounts", json={"name": "Coverage Timeline", "mask": "6606"})).json()["id"]
