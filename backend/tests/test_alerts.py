@@ -224,7 +224,7 @@ async def test_ask_about_transactions(client, monkeypatch):
 
     sent: list[dict] = []
 
-    async def fake_send(to, subject, text, html=None, reply_to=None):
+    async def fake_send(to, subject, text, html=None, reply_to=None, message_id=None):
         sent.append({"to": to, "subject": subject, "text": text, "html": html, "reply_to": reply_to})
 
     monkeypatch.setattr(questions, "send_email", fake_send)

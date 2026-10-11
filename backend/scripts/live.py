@@ -63,7 +63,7 @@ def main(cmd: str, *args: str) -> None:
         ]
         print(j["id"], j["status"], *frames[-8:], sep="\n")
     elif cmd == "backfill":
-        r = c.put("/backfill/settings", json={"provider": "drive", "folder": args[0], "auto_approve_bills": True})
+        r = c.put("/backfill/settings", json={"provider": "drive", "folders": args, "auto_approve_bills": True})
         print("configure:", r.status_code, r.json().get("folder_name") if r.status_code == 200 else r.text)
         j = wait(c, c.post("/backfill/scan").json()["id"])
         print("scan:", j["status"], j.get("result"), (j.get("error") or "")[:300])

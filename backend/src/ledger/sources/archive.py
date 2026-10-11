@@ -1,4 +1,4 @@
-"""Archive providers for the backfill: a Google Drive folder (shared with the service account) or a local folder."""
+"""Archive providers for the backfill: Google Drive folders (shared with the service account) or a local folder."""
 
 import asyncio
 import re
@@ -71,9 +71,9 @@ async def drive_folder_name(folder_id: str) -> str:
     return meta["name"]
 
 
-async def drive_list(folder_id: str) -> list[ArchiveFile]:
+async def drive_list(folder_id: str, root: str = "") -> list[ArchiveFile]:
     out: list[ArchiveFile] = []
-    queue: list[tuple[str, str]] = [(folder_id, "")]
+    queue: list[tuple[str, str]] = [(folder_id, root)]
     async with httpx.AsyncClient(timeout=60) as client:
         while queue and len(out) < MAX_FILES:
             fid, path = queue.pop(0)
@@ -177,9 +177,18 @@ async def local_download(external_id: str) -> bytes:
 async def list_files(settings: dict) -> list[ArchiveFile]:
     if settings.get("provider") == "local":
         return await local_list(settings.get("local_path", ""))
-    if not settings.get("folder_id"):
-        raise ArchiveError("Choose the archive folder first")
-    return await drive_list(settings["folder_id"])
+    folders = settings.get("folders") or []
+    if not folders:
+        raise ArchiveError("Add an archive folder first")
+    out: list[ArchiveFile] = []
+    seen: set[str] = set()
+    for folder in folders:
+        # Paths start with the root folder's name so files from different folders stay distinguishable.
+        for f in await drive_list(folder["id"], folder["name"]):
+            if f.external_id not in seen:
+                seen.add(f.external_id)
+                out.append(f)
+    return out
 
 
 async def download(provider: str, external_id: str, mime_type: str | None) -> bytes:

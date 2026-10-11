@@ -198,7 +198,7 @@ function NotesSection({ txnId }: { txnId: number }) {
             <>
               <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{n.body}</div>
               <div className="row small muted-2" style={{ gap: 8 }}>
-                <span>{n.source === 'import' ? `From ${n.filename ?? 'an import'}` : n.source === 'question' ? 'Emailed question' : 'Added by you'} · {shortDate(n.created_at)}</span>
+                <span>{n.source === 'import' ? `From ${n.filename ?? 'an import'}` : n.source === 'question' ? 'Emailed question' : n.source === 'reply' ? 'Email reply' : 'Added by you'} · {shortDate(n.created_at)}</span>
                 <button type="button" className="link-btn" onClick={() => setEditing({ id: n.id, body: n.body })}>Edit</button>
                 <button type="button" className="link-btn" disabled={remove.isPending}
                   onClick={() => confirm('Delete this note?') && remove.mutate(n.id)}>Delete</button>

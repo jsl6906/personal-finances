@@ -31,7 +31,28 @@ async def _backfill_watchdog() -> None:
         log.exception("Backfill watchdog failed")
 
 
+async def _backfill_auto_scan() -> None:
+    from ledger.sources.jobs import backfill_auto_scan
+
+    try:
+        async with get_sessionmaker()() as session:
+            await backfill_auto_scan(session)
+    except Exception:
+        log.exception("Backfill auto-scan failed")
+
+
+async def _poll_email() -> None:
+    from ledger.statements.email_inbox import poll_inbox
+
+    try:
+        await poll_inbox()
+    except Exception:
+        log.exception("Email inbox poll failed")
+
+
 def build_scheduler() -> AsyncIOScheduler:
+    from ledger.statements.email_inbox import inbox_configured
+
     s = get_settings()
     scheduler = AsyncIOScheduler(timezone=s.timezone)
     scheduler.add_job(
@@ -89,4 +110,11 @@ def build_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(
         _backfill_watchdog, "interval", minutes=10, id="backfill-watchdog", coalesce=True, max_instances=1
     )
+    scheduler.add_job(
+        _backfill_auto_scan, "interval", hours=1, id="backfill-auto-scan", coalesce=True, max_instances=1
+    )
+    if inbox_configured():
+        scheduler.add_job(
+            _poll_email, "interval", minutes=s.imap_poll_minutes, id="email-inbox", coalesce=True, max_instances=1
+        )
     return scheduler

@@ -183,6 +183,112 @@ async def test_watchdog_revives_broken_chain():
         await s.commit()
 
 
+async def test_multiple_drive_folders(client, monkeypatch):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import delete
+
+    from ledger.models import AppSetting
+
+    names = {"FolderAaaaaaaaaa": "Bank", "FolderBbbbbbbbbb": "Bills"}
+    listing = {
+        "FolderAaaaaaaaaa": [("multi-a1", "2019", "a.pdf"), ("multi-shared", "", "shared.pdf")],
+        "FolderBbbbbbbbbb": [("multi-b1", "2020", "b.pdf"), ("multi-shared", "", "shared.pdf")],
+    }
+
+    async def folder_name(fid):
+        return names[fid]
+
+    async def drive_list(fid, root=""):
+        return [
+            archive.ArchiveFile(ext, "/".join(p for p in (root, sub) if p), name, "application/pdf", 1, datetime.now(UTC))
+            for ext, sub, name in listing[fid]
+        ]
+
+    monkeypatch.setattr(archive, "drive_folder_name", folder_name)
+    monkeypatch.setattr(archive, "drive_list", drive_list)
+
+    async with get_sessionmaker()() as s:
+        # Settings from before multiple folders still load, and a scan under them stores unprefixed paths
+        await backfill.save_settings(s, provider="drive", folder_id="FolderAaaaaaaaaa", folder_name="Bank")
+        assert (await backfill.load_settings(s))["folders"] == [{"id": "FolderAaaaaaaaaa", "name": "Bank"}]
+        s.add(BackfillFile(provider="drive", external_id="multi-a1", path="2019", name="a.pdf"))
+        await s.commit()
+
+    assert (await client.put("/api/backfill/settings", json={"provider": "drive", "folders": []})).status_code == 422
+    r = await client.put(
+        "/api/backfill/settings",
+        json={
+            "provider": "drive",
+            "folders": [
+                "https://drive.google.com/drive/folders/FolderAaaaaaaaaa",
+                "FolderBbbbbbbbbb",
+                "FolderAaaaaaaaaa",
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert [f["name"] for f in r.json()["folders"]] == ["Bank", "Bills"]
+
+    async with get_sessionmaker()() as s:
+        result = await backfill.scan(s)
+        assert result == {**result, "found": 3, "new": 2}
+        files = {
+            f.external_id: f.path
+            for f in (await s.scalars(select(BackfillFile).where(BackfillFile.external_id.like("multi-%")))).all()
+        }
+        assert files == {"multi-a1": "Bank/2019", "multi-shared": "Bank", "multi-b1": "Bills/2020"}
+        await s.execute(delete(BackfillFile).where(BackfillFile.external_id.like("multi-%")))
+        await s.execute(delete(AppSetting).where(AppSetting.key == backfill.SETTINGS_KEY))
+        await s.commit()
+
+
+async def test_scheduled_scan_resumes_finished_backfill(client, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete
+
+    from ledger.jobs.worker import JobContext
+    from ledger.models import AppSetting, Job
+    from ledger.sources import jobs
+
+    listing: list[archive.ArchiveFile] = []
+
+    async def list_files(cfg):
+        return listing
+
+    monkeypatch.setattr(archive, "list_files", list_files)
+    monkeypatch.setattr(jobs, "notify_worker", lambda: None)
+
+    async with get_sessionmaker()() as s:
+        await backfill.save_settings(s, provider="drive", folders=[{"id": "x", "name": "X"}], paused=True)
+        await s.commit()
+        assert await jobs.backfill_auto_scan(s) is None  # off by default
+
+        await backfill.save_settings(s, scan_every_hours=6, last_scan={"at": datetime.now(UTC).isoformat()})
+        await s.commit()
+        assert await jobs.backfill_auto_scan(s) is None  # not due yet
+
+        old = (datetime.now(UTC) - timedelta(hours=7)).isoformat()
+        await backfill.save_settings(s, last_scan={"at": old})
+        await s.commit()
+        scan_id = await jobs.backfill_auto_scan(s)
+        assert scan_id is not None
+        assert await jobs.backfill_auto_scan(s) is None  # one already queued
+
+    listing.append(archive.ArchiveFile("auto-new", "X", "new.pdf", "application/pdf", 1, datetime.now(UTC)))
+    result = await jobs.backfill_scan_job(JobContext(scan_id, "backfill_scan", {"auto": True}))
+    assert result["new"] == 1 and result["started_job"]
+
+    async with get_sessionmaker()() as s:
+        assert (await backfill.load_settings(s))["paused"] is False
+        await backfill.save_settings(s, paused=True)
+        await s.execute(delete(Job).where(Job.type.in_(("backfill_scan", "backfill_run"))))
+        await s.execute(delete(BackfillFile).where(BackfillFile.external_id == "auto-new"))
+        await s.execute(delete(AppSetting).where(AppSetting.key == backfill.SETTINGS_KEY))
+        await s.commit()
+
+
 def test_drive_folder_ids():
     assert (
         archive.parse_folder_id("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing")

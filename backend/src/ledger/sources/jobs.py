@@ -94,11 +94,40 @@ async def backfill_watchdog(session: AsyncSession) -> int | None:
     return job.id
 
 
+async def backfill_auto_scan(session: AsyncSession) -> int | None:
+    """Queue a scan of the archive folders when the configured interval has passed since the last one."""
+    cfg = await backfill.load_settings(session)
+    hours = cfg["scan_every_hours"]
+    if not hours:
+        return None
+    last = (cfg["last_scan"] or {}).get("at")
+    # A few minutes' slack so an hourly tick doesn't skip a scan that finished just after the previous tick.
+    if last and datetime.fromisoformat(last) > datetime.now(UTC) - timedelta(hours=hours, minutes=-10):
+        return None
+    if await session.scalar(
+        select(Job.id).where(Job.type == "backfill_scan", Job.status.in_(("queued", "running"))).limit(1)
+    ):
+        return None
+    job = await enqueue(session, "backfill_scan", {"auto": True})
+    await session.commit()
+    notify_worker()
+    return job.id
+
+
 @job_handler("backfill_scan")
 async def backfill_scan_job(ctx: JobContext) -> dict:
     async with get_sessionmaker()() as session:
         await ctx.progress(0.1, "Listing archive files")
-        return await backfill.scan(session)
+        was_idle = await backfill.next_file(session) is None
+        result = await backfill.scan(session)
+        if not ctx.payload.get("auto") or not was_idle:
+            return result
+        # A finished backfill auto-pauses; resume it for new files unless it stopped on an error.
+        cfg = await backfill.load_settings(session)
+        if cfg["paused"] and not cfg["last_error"] and await backfill.next_file(session) is not None:
+            await backfill.save_settings(session, paused=False)
+            result["started_job"] = await backfill_watchdog(session)
+        return result
 
 
 @job_handler("backfill_run")

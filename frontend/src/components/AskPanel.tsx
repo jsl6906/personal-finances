@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { get, post, type Person } from '../api'
+import { get, post, type AlertStatus, type Person } from '../api'
 import { Button, ErrorNote, Field } from './ui'
 
 /** Email household members a question about one or more transactions; replies come back by email. */
 export function AskPanel({ ids, onSent, onClose }: { ids: number[]; onSent: (msg: string) => void; onClose: () => void }) {
   const qc = useQueryClient()
   const people = useQuery({ queryKey: ['alerts', 'people'], queryFn: () => get<Person[]>('/alerts/people') })
+  const status = useQuery({ queryKey: ['alerts', 'status'], queryFn: () => get<AlertStatus>('/alerts/status') })
+  const saved = status.data?.replies_saved ?? false
   const [to, setTo] = useState<string[]>([])
   const [replyTo, setReplyTo] = useState('')
   const [subject, setSubject] = useState('')
@@ -60,9 +62,9 @@ export function AskPanel({ ids, onSent, onClose }: { ids: number[]; onSent: (msg
             <Field label="Subject (optional)">
               <input className="input" maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} />
             </Field>
-            <Field label="Replies go to">
+            <Field label={saved ? 'Replies are saved in Ledger; also send them to' : 'Replies go to'}>
               <select className="input" value={replyTo} onChange={(e) => setReplyTo(e.target.value)}>
-                <option value="">The app’s email address</option>
+                <option value="">{saved ? 'No one else' : 'The app’s email address'}</option>
                 {list.map((p) => <option key={p.email} value={p.email}>{label(p)}</option>)}
               </select>
             </Field>

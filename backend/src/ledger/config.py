@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     digest_weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "mon"
     app_base_url: str | None = None  # used for links in emails, e.g. http://homeserver:8470
 
+    # Inbound email: bills/receipts forwarded to a mailbox the app polls over IMAP
+    imap_host: str | None = None
+    imap_port: int = 993
+    imap_username: str | None = None
+    imap_password: SecretStr | None = None
+    imap_folder: str = "INBOX"
+    imap_poll_minutes: int = Field(default=5, ge=1, le=1440)
+    mail_allowed_senders: str | None = None  # comma-separated; mail from anyone else is left untouched
+    # Address that lands in the polled folder (e.g. you+ledger@gmail.com); question emails ask for replies there
+    mail_inbound_address: str | None = None
+
     # Data sources: Google service account (share the Tiller sheet with its client_email)
     google_service_account_file: Path | None = None
     google_service_account_json: SecretStr | None = None

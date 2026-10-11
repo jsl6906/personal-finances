@@ -31,7 +31,9 @@ async def create_statement(
     from ledger.config import get_settings
     from ledger.jobs.worker import enqueue
 
-    if detect_kind(filename) != "document":
+    kind = detect_kind(filename)
+    # Extension-less text/plain is an email body (receipts that arrive as the message itself).
+    if kind != "document" and not (kind is None and content_type == "text/plain"):
         raise ImportError_("Upload a PDF or image of the bill or statement")
     if len(data) > get_settings().max_upload_mb * 1024 * 1024:
         raise ImportError_(f"File is larger than {get_settings().max_upload_mb} MB")

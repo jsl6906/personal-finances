@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import UTC, datetime
 
 from google.genai import errors as genai_errors
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,11 +31,12 @@ log = logging.getLogger(__name__)
 SETTINGS_KEY = "backfill"
 DEFAULTS = {
     "provider": "drive",
-    "folder_id": None,
+    "folders": [],
     "folder_name": None,
     "local_path": "",
     "paused": True,
     "auto_approve_bills": True,
+    "scan_every_hours": None,
     "last_scan": None,
     "last_error": None,
 }
@@ -51,7 +52,10 @@ FILES_PER_JOB = 20
 
 async def load_settings(session: AsyncSession) -> dict:
     row = await session.get(AppSetting, SETTINGS_KEY)
-    return {**DEFAULTS, **(row.value if row else {})}
+    cfg = {**DEFAULTS, **(row.value if row else {})}
+    if not cfg["folders"] and cfg.get("folder_id"):  # settings saved before multiple folders
+        cfg["folders"] = [{"id": cfg["folder_id"], "name": cfg["folder_name"] or cfg["folder_id"]}]
+    return cfg
 
 
 async def save_settings(session: AsyncSession, **values) -> dict:
@@ -65,11 +69,22 @@ async def scan(session: AsyncSession) -> dict:
     cfg = await load_settings(session)
     files = await archive.list_files(cfg)
     provider = "local" if cfg["provider"] == "local" else "drive"
-    known = set((await session.scalars(select(BackfillFile.external_id).where(BackfillFile.provider == provider))).all())
+    known = {
+        ext: (fid, path)
+        for fid, ext, path in (
+            await session.execute(
+                select(BackfillFile.id, BackfillFile.external_id, BackfillFile.path).where(BackfillFile.provider == provider)
+            )
+        ).all()
+    }
     tiller_sheet = await session.scalar(select(Source.config["sheet_id"].astext).where(Source.kind == "tiller"))
     new = unsupported = 0
+    moved = []
     for f in files:
         if f.external_id in known:
+            fid, path = known[f.external_id]
+            if path != f.path[:1000]:
+                moved.append({"id": fid, "path": f.path[:1000]})
             continue
         ok = f.supported
         new += 1
@@ -92,6 +107,8 @@ async def scan(session: AsyncSession) -> dict:
             )
             .on_conflict_do_nothing()
         )
+    if moved:
+        await session.execute(update(BackfillFile), moved)
     result = {"found": len(files), "new": new, "unsupported": unsupported, "at": datetime.now(UTC).isoformat()}
     await save_settings(session, last_scan=result)
     await session.commit()
@@ -121,6 +138,9 @@ async def classify(session: AsyncSession, bf: BackfillFile) -> None:
     from ledger.ai.backfill import classify_document
 
     data = await archive.download(bf.provider, bf.external_id, bf.mime_type)
+    if not data:
+        bf.status, bf.message = "skipped", "Empty file (0 bytes)"
+        return
     bf.detail = {**bf.detail, "sha256": hashlib.sha256(data).hexdigest()}
     att = await store_attachment(session, data, bf.name, None, source="backfill")
     dup = await _already_imported(session, bf, att)

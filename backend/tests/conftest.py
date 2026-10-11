@@ -18,6 +18,8 @@ os.environ.update(
         # Blank = unset: tests must never reach the real mail server, Google or the inbox folder.
         "SMTP_HOST": "",
         "SMTP_PASSWORD": "",
+        "IMAP_HOST": "",
+        "IMAP_PASSWORD": "",
         "GOOGLE_SERVICE_ACCOUNT_FILE": "",
         "GOOGLE_SERVICE_ACCOUNT_JSON": "",
         "INBOX_DIR": "",

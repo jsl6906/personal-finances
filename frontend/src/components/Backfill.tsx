@@ -32,6 +32,7 @@ const STATUS: Record<BackfillFileRow['status'], [string, string]> = {
   failed: ['Failed', 'tag-outline'],
 }
 const KINDS = ['bank_statement', 'credit_card_statement', 'loan_statement', 'utility_bill', 'other_bill', 'spreadsheet']
+const SCAN_LABEL: Record<number, string> = { 1: 'Every hour', 6: 'Every 6 hours', 24: 'Daily', 168: 'Weekly' }
 
 export function BackfillCard() {
   const qc = useQueryClient()
@@ -57,7 +58,7 @@ export function BackfillCard() {
 
   const d = ov.data
   const s = d?.summary
-  const configured = !!d && (d.settings.provider === 'local' ? d.settings.folder_name !== null : !!d.settings.folder_id)
+  const configured = !!d && (d.settings.provider === 'local' ? d.settings.folder_name !== null : d.settings.folders.length > 0)
   const flagged = (s?.by_status.review ?? 0) + (s?.by_status.failed ?? 0)
   const years = s?.earliest ? `${s.earliest.slice(0, 4)} – ${(s.latest ?? s.earliest).slice(0, 4)}` : ''
   // Not paused but no job queued means the job chain broke; show Start so it can be revived.
@@ -71,10 +72,16 @@ export function BackfillCard() {
           <div className="card-title">
             {s && s.total ? `${s.processed.toLocaleString()} of ${s.total.toLocaleString()} files processed${years ? ` · ${years}` : ''}` : 'Historical archive'}
           </div>
+          {d?.settings.last_scan && (
+            <div className="small text-muted">
+              Last checked {new Date(d.settings.last_scan.at).toLocaleString()}
+              {d.settings.scan_every_hours ? ` · checks ${SCAN_LABEL[d.settings.scan_every_hours]?.toLowerCase() ?? `every ${d.settings.scan_every_hours} hours`}` : ''}
+            </div>
+          )}
         </div>
         <div className="row">
           <Button onClick={() => act.mutate('/backfill/scan')} disabled={!configured || act.isPending || d?.active_job?.type === 'backfill_scan'}>
-            {d?.active_job?.type === 'backfill_scan' ? 'Scanning…' : 'Scan folder'}
+            {d?.active_job?.type === 'backfill_scan' ? 'Scanning…' : d?.settings.provider === 'drive' && d.settings.folders.length > 1 ? 'Scan folders' : 'Scan folder'}
           </Button>
           {running
             ? <Button onClick={() => act.mutate('/backfill/pause')}>Pause</Button>
@@ -182,51 +189,88 @@ function FileActions({ f, onAction }: { f: BackfillFileRow; onAction: (action: s
   )
 }
 
+const driveUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
+
 function BackfillSettingsForm({ overview, open: initiallyOpen }: { overview: BackfillOverview; open: boolean }) {
   const qc = useQueryClient()
   const cfg = overview.settings
   const [open, setOpen] = useState(initiallyOpen)
   const [provider, setProvider] = useState<'drive' | 'local'>(cfg.provider)
-  const driveUrl = cfg.folder_id ? `https://drive.google.com/drive/folders/${cfg.folder_id}` : ''
-  const [folder, setFolder] = useState(cfg.provider === 'local' ? cfg.local_path : driveUrl)
+  const [driveFolders, setDriveFolders] = useState(cfg.folders)
+  const [draft, setDraft] = useState('')
+  const [localPath, setLocalPath] = useState(cfg.local_path)
   const [approve, setApprove] = useState(cfg.auto_approve_bills)
+  const [scanEvery, setScanEvery] = useState(cfg.scan_every_hours)
+  const folders = [...driveFolders.map((f) => f.id), ...(draft.trim() ? [draft.trim()] : [])]
   const save = useMutation({
-    mutationFn: () => put('/backfill/settings', { provider, folder, auto_approve_bills: approve }),
-    onSuccess: () => { setOpen(false); qc.invalidateQueries({ queryKey: ['backfill'] }) },
+    mutationFn: () => put('/backfill/settings', { provider, folder: localPath, folders, auto_approve_bills: approve, scan_every_hours: scanEvery }),
+    onSuccess: () => { setOpen(false); setDraft(''); qc.invalidateQueries({ queryKey: ['backfill'] }) },
   })
+  const addDraft = () => {
+    if (!draft.trim()) return
+    setDriveFolders([...driveFolders, { id: draft.trim(), name: draft.trim() }])
+    setDraft('')
+  }
   if (!open) return <button className="btn btn-ghost small" style={{ alignSelf: 'start' }} onClick={() => setOpen(true)}>Settings</button>
   return (
     <div className="stack" style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)', maxWidth: 640 }}>
       <Seg name="bf-provider" value={provider} onChange={setProvider}
-        options={[{ value: 'drive', label: 'Google Drive folder' }, { value: 'local', label: 'Local inbox folder' }]} />
+        options={[{ value: 'drive', label: 'Google Drive folders' }, { value: 'local', label: 'Local inbox folder' }]} />
       {provider === 'drive' ? (
-        <div className="small">
-          {overview.google_service_account
-            ? <>Share the archive folder (Viewer) with <code style={{ userSelect: 'all' }}>{overview.google_service_account}</code>, then paste its URL. Subfolders are included.</>
-            : <>Configure the Google service account first (see the Tiller card).</>}
-          {cfg.provider === 'drive' && cfg.folder_id && (
-            <div style={{ marginTop: 'var(--space-1)' }}>
-              Current folder: <a href={driveUrl} target="_blank" rel="noopener noreferrer"><strong>{cfg.folder_name ?? cfg.folder_id}</strong></a>
+        <>
+          <div className="small">
+            {overview.google_service_account
+              ? <>Share each archive folder (Viewer) with <code style={{ userSelect: 'all' }}>{overview.google_service_account}</code>, then add its URL. Subfolders are included.</>
+              : <>Configure the Google service account first (see the Tiller card).</>}
+          </div>
+          {driveFolders.length > 0 && (
+            <div className="stack small" style={{ gap: 4 }}>
+              {driveFolders.map((f, i) => (
+                <div key={`${i}-${f.id}`} className="row" style={{ justifyContent: 'space-between' }}>
+                  {f.name === f.id
+                    ? <span className="text-muted">{f.id} (checked on save)</span>
+                    : <a href={driveUrl(f.id)} target="_blank" rel="noopener noreferrer"><strong>{f.name}</strong></a>}
+                  <button className="btn btn-ghost small" onClick={() => setDriveFolders(driveFolders.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+              ))}
             </div>
           )}
-        </div>
+          <div className="row">
+            <input className="input" style={{ flex: 1 }} value={draft} onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addDraft() }}
+              placeholder="https://drive.google.com/drive/folders/…" />
+            <Button onClick={addDraft} disabled={!draft.trim()}>Add folder</Button>
+          </div>
+          {cfg.provider === 'drive' && cfg.folders.some((f) => !driveFolders.some((g) => g.id === f.id)) && (
+            <div className="small text-muted">Files already queued from removed folders stay in the queue; skip them if needed.</div>
+          )}
+        </>
       ) : (
-        <div className="small">
-          {overview.inbox_configured
-            ? <>A path inside the mounted inbox volume; leave empty for the whole inbox.</>
-            : <>Set <code>INBOX_DIR</code> (e.g. <code>/inbox</code>, mounted from the host) to use a local folder.</>}
-        </div>
+        <>
+          <div className="small">
+            {overview.inbox_configured
+              ? <>A path inside the mounted inbox volume; leave empty for the whole inbox.</>
+              : <>Set <code>INBOX_DIR</code> (e.g. <code>/inbox</code>, mounted from the host) to use a local folder.</>}
+          </div>
+          <input className="input" value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder="statements/2012" />
+        </>
       )}
-      <input className="input" value={folder} onChange={(e) => setFolder(e.target.value)}
-        placeholder={provider === 'drive' ? 'https://drive.google.com/drive/folders/…' : 'statements/2012'} />
+      <label className="row small">
+        Check for new files
+        <select className="input compact" value={scanEvery ?? ''} onChange={(e) => setScanEvery(e.target.value ? Number(e.target.value) : null)}>
+          <option value="">Only when I click Scan</option>
+          {Object.entries(SCAN_LABEL).map(([h, label]) => <option key={h} value={h}>{label}</option>)}
+        </select>
+      </label>
+      {scanEvery && <div className="small text-muted">New files are imported automatically once the queue has finished.</div>}
       <label className="row small">
         <input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} />
         File bills automatically (otherwise each waits for approval in Bills &amp; statements)
       </label>
       <ErrorNote error={save.error} />
       <div className="row">
-        <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || (provider === 'drive' && !folder.trim())}>
-          {save.isPending ? 'Checking folder…' : 'Save'}
+        <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || (provider === 'drive' && !folders.length)}>
+          {save.isPending ? 'Checking folders…' : 'Save'}
         </Button>
         {!initiallyOpen && <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}
       </div>

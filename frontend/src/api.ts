@@ -90,7 +90,7 @@ export interface TxnSource {
   txn_date: string | null; description: string | null; amount: string | null; match_score: string | null; created_at: string
 }
 export interface TxnNote {
-  id: number; body: string; source: 'user' | 'import' | 'question'; import_batch_id: number | null; attachment_id: number | null
+  id: number; body: string; source: 'user' | 'import' | 'question' | 'reply'; import_batch_id: number | null; attachment_id: number | null
   filename: string | null; created_at: string; updated_at: string
 }
 
@@ -251,8 +251,8 @@ export interface TxnPair {
 
 // ---- backfill ----
 export interface BackfillSettings {
-  provider: 'drive' | 'local'; folder_id: string | null; folder_name: string | null; local_path: string
-  paused: boolean; auto_approve_bills: boolean; last_error: string | null
+  provider: 'drive' | 'local'; folders: { id: string; name: string }[]; folder_name: string | null; local_path: string
+  paused: boolean; auto_approve_bills: boolean; scan_every_hours: number | null; last_error: string | null
   last_scan: { found: number; new: number; unsupported: number; at: string } | null
 }
 export interface BackfillSummary {
@@ -319,6 +319,8 @@ export interface AlertEvent {
 export interface AlertStatus {
   smtp_configured: boolean; smtp_host: string | null; smtp_from: string | null; app_base_url: string | null
   digest_weekday: string; recipients: number
+  /** Replies to emailed questions reach the app's inbox and are saved as notes. */
+  replies_saved: boolean
 }
 export interface DigestPreview { subject: string; title: string; text: string; html: string; summary: string | null }
 /** Someone a question about transactions can be emailed to (household member with an email, or alert recipient). */

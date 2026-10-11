@@ -1,7 +1,9 @@
 """Email household members a question about one or more transactions."""
 
+import re
 import uuid
 from datetime import UTC, datetime
+from email.utils import make_msgid, parseaddr
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ledger.alerts import email_html as mail
 from ledger.alerts.mailer import EMAIL_RE, MailNotConfigured, send_email, smtp_configured
 from ledger.alerts.service import _url, money
+from ledger.config import get_settings
 from ledger.models import AlertEvent, AlertRecipient, HouseholdMember, Transaction, TransactionNote
 
 MAX_TRANSACTIONS = 100
+# Embedded in the question's Message-ID; replies quote it back in In-Reply-To/References.
+TOKEN_RE = re.compile(r"ledger-q-([0-9a-f]{32})")
+
+
+def replies_saved() -> bool:
+    """Whether replies to questions reach the polled inbox and get saved on the transactions."""
+    from ledger.statements.email_inbox import inbox_configured
+
+    return bool(get_settings().mail_inbound_address) and inbox_configured()
 
 
 class QuestionError(ValueError):
@@ -79,14 +91,21 @@ def _table(txns: list[Transaction]) -> str:
     )
 
 
-def render(txns: list[Transaction], message: str, asker: dict | None, subject: str | None = None) -> dict:
+def render(
+    txns: list[Transaction], message: str, asker: dict | None, subject: str | None = None, saved: bool = False
+) -> dict:
     n = len(txns)
     about = "this transaction" if n == 1 else f"{n} transactions"
     heading = f"{_who(asker)} has a question about {about}" if asker else f"A question about {about}"
     if not subject:
         subject = f"Question: {txns[0].description} {_money(txns[0].amount)}" if n == 1 else f"Question about {about}"
     open_url = _url(f"/transactions/{txns[0].id}") if n == 1 else _url("/transactions")
-    reply = f"Reply to this email to answer{f' — it goes to {_who(asker)}' if asker else ''}."
+    if saved:
+        also = f" and sent to {_who(asker)}" if asker else ""
+        what = "transaction" if n == 1 else "transactions"
+        reply = f"Reply to this email to answer — your reply is saved on the {what} in Ledger{also}."
+    else:
+        reply = f"Reply to this email to answer{f' — it goes to {_who(asker)}' if asker else ''}."
 
     lines = [
         f"{t.txn_date:%d %b %Y}  {t.description}  {_money(t.amount)}  ({_detail(t)})"
@@ -146,17 +165,30 @@ async def ask(
         raise MailNotConfigured("SMTP is not configured; set SMTP_HOST and SMTP_FROM in the environment")
 
     asker = known.get(reply_to) if reply_to else None
-    email = render(txns, message, asker, (subject or "").strip() or None)
+    saved = replies_saved()
+    email = render(txns, message, asker, (subject or "").strip() or None, saved)
+    token = uuid.uuid4().hex
+    s = get_settings()
+    domain = parseaddr(s.smtp_from or s.smtp_username or "")[1].rpartition("@")[2] or "ledger.local"
+    reply_addrs = [a for a in ((s.mail_inbound_address if saved else None), reply_to) if a]
     event = AlertEvent(
         kind="question",
-        subject_key=f"question:{uuid.uuid4().hex}",
+        subject_key=f"question:{token}",
         title=email["subject"][:300],
         body=message,
         link=f"/transactions/{txns[0].id}" if len(txns) == 1 else None,
+        transaction_ids=[t.id for t in txns],
     )
     session.add(event)
     try:
-        await send_email(to, email["subject"], email["text"], email["html"], reply_to=reply_to)
+        await send_email(
+            to,
+            email["subject"],
+            email["text"],
+            email["html"],
+            reply_to=", ".join(reply_addrs) or None,
+            message_id=make_msgid(f"ledger-q-{token}", domain=domain),
+        )
     except Exception as exc:
         event.status, event.error = "failed", str(exc)[:1000]
         await session.commit()

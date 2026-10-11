@@ -36,7 +36,14 @@ def _one_line(s: str) -> str:
     return " ".join(s.split())[:200]
 
 
-async def send_email(to: list[str], subject: str, text: str, html: str | None = None, reply_to: str | None = None) -> None:
+async def send_email(
+    to: list[str],
+    subject: str,
+    text: str,
+    html: str | None = None,
+    reply_to: str | None = None,
+    message_id: str | None = None,
+) -> None:
     s = get_settings()
     if not smtp_configured():
         raise MailNotConfigured("SMTP is not configured (set SMTP_HOST and SMTP_FROM)")
@@ -45,6 +52,8 @@ async def send_email(to: list[str], subject: str, text: str, html: str | None = 
     msg["To"] = ", ".join(to)
     if reply_to:
         msg["Reply-To"] = _one_line(reply_to)
+    if message_id:
+        msg["Message-ID"] = message_id
     msg["Subject"] = _one_line(subject)
     msg.set_content(text)
     if html:

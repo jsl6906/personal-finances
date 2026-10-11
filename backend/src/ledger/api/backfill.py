@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -40,21 +40,33 @@ async def overview(session: AsyncSession = Depends(get_session)):
 class SettingsIn(BaseModel):
     provider: Literal["drive", "local"]
     folder: str = Field("", max_length=500)
+    folders: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
     auto_approve_bills: bool = True
+    scan_every_hours: int | None = Field(None, ge=1, le=168)
 
 
 @router.put("/settings")
 async def update_settings(body: SettingsIn, session: AsyncSession = Depends(get_session)):
     try:
         if body.provider == "drive":
-            folder_id = archive.parse_folder_id(body.folder)
-            values = {"provider": "drive", "folder_id": folder_id, "folder_name": await archive.drive_folder_name(folder_id)}
+            ids = list(dict.fromkeys(archive.parse_folder_id(f) for f in body.folders if f.strip()))
+            if not ids:
+                raise archive.ArchiveError("Add at least one Google Drive folder")
+            folders = [{"id": i, "name": await archive.drive_folder_name(i)} for i in ids]
+            values = {
+                "provider": "drive",
+                "folders": folders,
+                "folder_id": None,
+                "folder_name": ", ".join(f["name"] for f in folders),
+            }
         else:
             archive.resolve_local(body.folder)
             values = {"provider": "local", "local_path": body.folder.strip(), "folder_name": body.folder.strip() or "inbox"}
     except archive.ArchiveError as exc:
         raise HTTPException(422, str(exc)) from None
-    cfg = await backfill.save_settings(session, auto_approve_bills=body.auto_approve_bills, **values)
+    cfg = await backfill.save_settings(
+        session, auto_approve_bills=body.auto_approve_bills, scan_every_hours=body.scan_every_hours, **values
+    )
     await session.commit()
     return cfg
 
